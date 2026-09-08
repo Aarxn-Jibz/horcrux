@@ -1,0 +1,1 @@
+{"name":"@ciphermesh/shared","private":true,"type":"module","exports":"./src/index.ts","scripts":{"typecheck":"tsc --noEmit --pretty false","build":"true"},"dependencies":{"zod":"^4.1.5"}}

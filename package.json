@@ -1,0 +1,19 @@
+{
+  "name": "ciphermesh",
+  "private": true,
+  "packageManager": "bun@1.2.21",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev:web": "bun --cwd apps/web dev",
+    "dev:api": "bun --cwd apps/api dev",
+    "build": "bun run --filter '*' build",
+    "typecheck": "bun run --filter '*' typecheck",
+    "test": "bun test",
+    "db:migrate:local": "bun --cwd apps/api db:migrate:local"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.21",
+    "typescript": "^5.9.2"
+  }
+}
+

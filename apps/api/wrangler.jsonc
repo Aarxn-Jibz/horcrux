@@ -1,0 +1,9 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ciphermesh-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "d1_databases": [{ "binding": "DB", "database_name": "ciphermesh", "database_id": "replace-with-production-d1-id", "migrations_dir": "migrations" }],
+  "vars": { "WEB_ORIGIN": "http://localhost:5173" }
+}
+
