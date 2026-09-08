@@ -1,0 +1,6 @@
+export function concatBytes(parts: readonly Uint8Array[], length?: number): Uint8Array { const total = parts.reduce((sum, part) => sum + part.byteLength, 0); const output = new Uint8Array(length ?? total); let offset = 0; for (const part of parts) { if (offset >= output.length) break; output.set(part.subarray(0, output.length - offset), offset); offset += part.byteLength; } return output; }
+export function bytesToHex(bytes: Uint8Array): string { return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join(""); }
+export function bytesToBase64Url(bytes: Uint8Array): string { let binary = ""; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, ""); }
+export function base64UrlToBytes(value: string): Uint8Array { const padded = value.replaceAll("-", "+").replaceAll("_", "/").padEnd(Math.ceil(value.length / 4) * 4, "="); return Uint8Array.from(atob(padded), (char) => char.charCodeAt(0)); }
+export function asWebCryptoBytes(bytes: Uint8Array): Uint8Array<ArrayBuffer> { return bytes as Uint8Array<ArrayBuffer>; }
+export async function sha256(bytes: Uint8Array): Promise<string> { return bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", asWebCryptoBytes(bytes)))); }

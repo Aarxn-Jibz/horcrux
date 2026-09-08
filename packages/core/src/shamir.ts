@@ -1,0 +1,3 @@
+import { combine, split } from "shamir-secret-sharing";
+export interface SecretSharingProvider { splitSecret(secret: Uint8Array, totalShares: number, threshold: number): Promise<Uint8Array[]>; combineShares(shares: Uint8Array[]): Promise<Uint8Array> }
+export class AuditedShamirProvider implements SecretSharingProvider { async splitSecret(secret: Uint8Array, totalShares: number, threshold: number) { if (threshold < 2 || totalShares < threshold || totalShares > 255) throw new Error("Invalid Shamir parameters"); return split(secret, totalShares, threshold); } async combineShares(shares: Uint8Array[]) { if (shares.length < 2) throw new Error("Insufficient Shamir shares"); return combine(shares); } }
