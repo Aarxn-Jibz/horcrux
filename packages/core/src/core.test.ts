@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AuditedShamirProvider, WasmReedSolomonProvider, WebCryptoAesGcm, ZstdCompressionProvider, sha256 } from "./index";
+import { AuditedShamirProvider, WasmReedSolomonProvider, WebCryptoAesGcm, ZstdCompressionProvider, reedSolomonFromResponse, sha256 } from "./index";
 
 const input = new TextEncoder().encode("CipherMesh roundtrip payload ".repeat(80));
 
@@ -27,6 +27,13 @@ describe("browser processing primitives", () => {
     const rs = new WasmReedSolomonProvider(); const encoded = await rs.encode(input, 3, 2);
     encoded.shards[0] = null as unknown as Uint8Array;
     encoded.shards[3] = null as unknown as Uint8Array;
+    expect(await rs.decode(encoded.shards, 3, 2, input.byteLength)).toEqual(input);
+  });
+
+  test("browser WASM loader avoids the package's Node wrapper", async () => {
+    const wasm = Bun.file(new URL("../node_modules/@subspace/reed-solomon-erasure.wasm/dist/reed_solomon_erasure_bg.wasm", import.meta.url));
+    const rs = new WasmReedSolomonProvider(async () => reedSolomonFromResponse(new Response(await wasm.arrayBuffer(), { headers: { "Content-Type": "application/wasm" } })));
+    const encoded = await rs.encode(input, 3, 2); encoded.shards[1] = null as unknown as Uint8Array;
     expect(await rs.decode(encoded.shards, 3, 2, input.byteLength)).toEqual(input);
   });
 
