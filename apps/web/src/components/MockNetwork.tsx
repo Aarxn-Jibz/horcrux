@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { StorageNodeContract } from "@ciphermesh/shared";
+import type { StorageNodeContract } from "@horcrux-file-system/shared";
 import { listDevices } from "../lib/api";
 import { mockStorage } from "../lib/pipeline";
 

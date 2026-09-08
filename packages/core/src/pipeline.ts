@@ -1,5 +1,5 @@
-import type { FileManifest, ObjectPlacement } from "@ciphermesh/shared";
-import type { ShardTransport } from "@ciphermesh/storage";
+import type { FileManifest, ObjectPlacement } from "@horcrux-file-system/shared";
+import type { ShardTransport } from "@horcrux-file-system/storage";
 import { base64UrlToBytes, bytesToBase64Url, sha256 } from "./bytes";
 import type { CompressionProvider } from "./compression";
 import type { EncryptionProvider } from "./aes";

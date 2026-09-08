@@ -1,4 +1,4 @@
-import type { PipelineStage } from "@ciphermesh/core";
+import type { PipelineStage } from "@horcrux-file-system/core";
 const steps: Array<{ key: PipelineStage | "saving"; label: string }> = [{ key: "preparing", label: "Preparing" }, { key: "compressing", label: "Compressing" }, { key: "encrypting", label: "Encrypting" }, { key: "encoding", label: "Encoding" }, { key: "splitting-key", label: "Splitting key" }, { key: "distributing", label: "Distributing shards" }, { key: "saving", label: "Saving metadata" }, { key: "complete", label: "Complete" }];
 export function ProgressSteps({ current }: { current: PipelineStage | "saving" }) { const active = steps.findIndex((step) => step.key === current); return <ol className="progress-steps">{steps.map((step, index) => <li className={index < active ? "done" : index === active ? "active" : ""} key={step.key}><span>{index < active ? "✓" : index + 1}</span>{step.label}</li>)}</ol>; }
 

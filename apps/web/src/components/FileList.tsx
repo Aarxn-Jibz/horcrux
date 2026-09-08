@@ -1,4 +1,4 @@
-import type { FileSummary } from "@ciphermesh/shared";
+import type { FileSummary } from "@horcrux-file-system/shared";
 
 function size(bytes: number) { if (bytes < 1024) return `${bytes} B`; if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KiB`; return `${(bytes / 1048576).toFixed(1)} MiB`; }
 export function FileList({ files, selected, onSelect }: { files: FileSummary[]; selected?: string; onSelect(id: string): void }) { return <section className="panel files-panel"><div className="panel-heading"><div><p className="eyebrow">Your vault</p><h2>Files</h2></div><span className="count">{files.length}</span></div>{files.length === 0 ? <div className="empty"><span>◇</span><p>No encrypted files yet.</p></div> : <ul className="file-list">{files.map((file) => <li key={file.fileId}><button className={selected === file.fileId ? "selected" : ""} onClick={() => onSelect(file.fileId)}><span className="file-icon">▧</span><span><strong>{file.originalName}</strong><small>{size(file.originalSize)} · {new Date(file.createdAt).toLocaleDateString()}</small></span><span className={`status ${file.status}`}>{file.status}</span></button></li>)}</ul>}</section>; }

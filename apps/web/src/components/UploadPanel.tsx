@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { DEFAULT_PIPELINE } from "@ciphermesh/shared";
-import { sha256, type PipelineStage } from "@ciphermesh/core";
+import { DEFAULT_PIPELINE } from "@horcrux-file-system/shared";
+import { sha256, type PipelineStage } from "@horcrux-file-system/core";
 import { completeFile, deleteFile, initializeFile, updateUploadState } from "../lib/api";
 import { filePipeline } from "../lib/pipeline";
 import { ProgressSteps } from "./ProgressSteps";

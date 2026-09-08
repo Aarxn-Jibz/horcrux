@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import { credentialsSchema } from "@ciphermesh/shared";
+import { credentialsSchema } from "@horcrux-file-system/shared";
 import type { Env } from "../env";
 import type { ApiVariables } from "../middleware/auth";
 import { requireAuth } from "../middleware/auth";
@@ -8,7 +8,7 @@ import { ApiError } from "../lib/http";
 import { hashPassword, verifyPassword } from "../lib/password";
 import { createRefreshToken, hashToken, issueAccessToken } from "../lib/tokens";
 
-const REFRESH_COOKIE = "ciphermesh_refresh";
+const REFRESH_COOKIE = "horcrux_file_system_refresh";
 type UserRow = { id: string; email: string; password_hash: string };
 type RefreshRow = { id: string; user_id: string; email: string; expires_at: string; revoked_at: string | null };
 const router = new Hono<{ Bindings: Env; Variables: ApiVariables }>();

@@ -3,16 +3,16 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "ciphermesh",
+      "name": "horcrux-file-system",
       "devDependencies": {
         "@types/bun": "^1.2.21",
         "typescript": "^5.9.2",
       },
     },
     "apps/api": {
-      "name": "@ciphermesh/api",
+      "name": "@horcrux-file-system/api",
       "dependencies": {
-        "@ciphermesh/shared": "workspace:*",
+        "@horcrux-file-system/shared": "workspace:*",
         "hono": "^4.9.6",
         "zod": "^4.1.5",
       },
@@ -22,11 +22,11 @@
       },
     },
     "apps/web": {
-      "name": "@ciphermesh/web",
+      "name": "@horcrux-file-system/web",
       "dependencies": {
-        "@ciphermesh/core": "workspace:*",
-        "@ciphermesh/shared": "workspace:*",
-        "@ciphermesh/storage": "workspace:*",
+        "@horcrux-file-system/core": "workspace:*",
+        "@horcrux-file-system/shared": "workspace:*",
+        "@horcrux-file-system/storage": "workspace:*",
         "@subspace/reed-solomon-erasure.wasm": "^0.2.5",
         "react": "^19.1.1",
         "react-dom": "^19.1.1",
@@ -39,23 +39,23 @@
       },
     },
     "packages/core": {
-      "name": "@ciphermesh/core",
+      "name": "@horcrux-file-system/core",
       "dependencies": {
         "@bokuweb/zstd-wasm": "^0.0.27",
-        "@ciphermesh/shared": "workspace:*",
-        "@ciphermesh/storage": "workspace:*",
+        "@horcrux-file-system/shared": "workspace:*",
+        "@horcrux-file-system/storage": "workspace:*",
         "@subspace/reed-solomon-erasure.wasm": "^0.2.5",
         "shamir-secret-sharing": "^0.0.4",
       },
     },
     "packages/shared": {
-      "name": "@ciphermesh/shared",
+      "name": "@horcrux-file-system/shared",
       "dependencies": {
         "zod": "^4.1.5",
       },
     },
     "packages/storage": {
-      "name": "@ciphermesh/storage",
+      "name": "@horcrux-file-system/storage",
     },
   },
   "packages": {
@@ -99,15 +99,15 @@
 
     "@bokuweb/zstd-wasm": ["@bokuweb/zstd-wasm@0.0.27", "", {}, "sha512-GDm2uOTK3ESjnYmSeLQifJnBsRCWajKLvN32D2ZcQaaCIJI/Hse9s74f7APXjHit95S10UImsRGkTsbwHmrtmg=="],
 
-    "@ciphermesh/api": ["@ciphermesh/api@workspace:apps/api"],
+    "@horcrux-file-system/api": ["@horcrux-file-system/api@workspace:apps/api"],
 
-    "@ciphermesh/core": ["@ciphermesh/core@workspace:packages/core"],
+    "@horcrux-file-system/core": ["@horcrux-file-system/core@workspace:packages/core"],
 
-    "@ciphermesh/shared": ["@ciphermesh/shared@workspace:packages/shared"],
+    "@horcrux-file-system/shared": ["@horcrux-file-system/shared@workspace:packages/shared"],
 
-    "@ciphermesh/storage": ["@ciphermesh/storage@workspace:packages/storage"],
+    "@horcrux-file-system/storage": ["@horcrux-file-system/storage@workspace:packages/storage"],
 
-    "@ciphermesh/web": ["@ciphermesh/web@workspace:apps/web"],
+    "@horcrux-file-system/web": ["@horcrux-file-system/web@workspace:apps/web"],
 
     "@cloudflare/kv-asset-handler": ["@cloudflare/kv-asset-handler@0.5.0", "", {}, "sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg=="],
 

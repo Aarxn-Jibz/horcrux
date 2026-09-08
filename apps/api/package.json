@@ -1,15 +1,15 @@
 {
-  "name": "@ciphermesh/api",
+  "name": "@horcrux-file-system/api",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "build": "wrangler deploy --dry-run --outdir dist",
     "typecheck": "tsc --noEmit --pretty false",
-    "db:migrate:local": "wrangler d1 migrations apply ciphermesh --local"
+    "db:migrate:local": "wrangler d1 migrations apply horcrux-file-system --local"
   },
   "dependencies": {
-    "@ciphermesh/shared": "workspace:*",
+    "@horcrux-file-system/shared": "workspace:*",
     "hono": "^4.9.6",
     "zod": "^4.1.5"
   },

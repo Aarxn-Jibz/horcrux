@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { MemoryShardTransport } from "@ciphermesh/storage";
+import { MemoryShardTransport } from "@horcrux-file-system/storage";
 import { BrowserFilePipeline, AuditedShamirProvider, WasmReedSolomonProvider, WebCryptoAesGcm, ZstdCompressionProvider, sha256 } from "./index";
 
 const nodes = ["a", "b", "c", "d", "e"];

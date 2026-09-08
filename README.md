@@ -1,6 +1,6 @@
-# CipherMesh
+# Horcrux File System
 
-CipherMesh is a working first vertical slice of a zero-knowledge-style distributed file store. A React browser client compresses, encrypts, erasure-codes, and distributes every file. A Hono Worker on Cloudflare stores only users, authorization state, upload state, and reconstruction metadata in D1. Development storage nodes are durable IndexedDB-backed mocks and can be taken offline from the dashboard.
+Horcrux File System is a working first vertical slice of a zero-knowledge-style distributed file store. A React browser client compresses, encrypts, erasure-codes, and distributes every file. A Hono Worker on Cloudflare stores only users, authorization state, upload state, and reconstruction metadata in D1. Development storage nodes are durable IndexedDB-backed mocks and can be taken offline from the dashboard.
 
 The master never receives file plaintext, an AES key, a Shamir share, or an encrypted shard body.
 
@@ -97,7 +97,7 @@ Tests cover AES-GCM and authenticated-data failure, Shamir threshold recovery an
 ## Cloudflare deployment
 
 1. Create a D1 database and put its production ID in `apps/api/wrangler.jsonc`.
-2. Apply migrations with `bun --cwd apps/api wrangler d1 migrations apply ciphermesh --remote`.
+2. Apply migrations with `bun --cwd apps/api wrangler d1 migrations apply horcrux-file-system --remote`.
 3. Store the JWT secret; never put it in Wrangler vars or Git:
 
    ```bash

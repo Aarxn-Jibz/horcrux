@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { fileCommitSchema, fileInitSchema } from "@ciphermesh/shared";
+import { fileCommitSchema, fileInitSchema } from "@horcrux-file-system/shared";
 import { z } from "zod";
 import type { Env } from "../env";
 import type { ApiVariables } from "../middleware/auth";

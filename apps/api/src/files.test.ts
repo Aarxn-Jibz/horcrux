@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fileCommitSchema, fileInitSchema } from "@ciphermesh/shared";
+import { fileCommitSchema, fileInitSchema } from "@horcrux-file-system/shared";
 import { getOwnedFile, serializeFile, type FileRow } from "./data/files";
 
 const row: FileRow = { id: "file-1", owner_user_id: "owner-1", original_name: "hello.txt", mime_type: "text/plain", original_size: 5, compressed_size: null, encrypted_size: null, plaintext_hash: "a".repeat(64), ciphertext_hash: null, status: "uploading", encryption_algorithm: "AES-256-GCM", compression_algorithm: "zstd", encryption_iv: null, rs_data_shards: 3, rs_parity_shards: 2, rs_shard_size: null, key_share_threshold: 3, key_share_count: 5, created_at: "2026-01-01" };

@@ -1,4 +1,4 @@
-import type { FileManifest, FileSummary, StorageNodeContract } from "@ciphermesh/shared";
+import type { FileManifest, FileSummary, StorageNodeContract } from "@horcrux-file-system/shared";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8787";
 let accessToken: string | null = null;

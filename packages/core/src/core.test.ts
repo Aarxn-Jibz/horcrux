@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { AuditedShamirProvider, WasmReedSolomonProvider, WebCryptoAesGcm, ZstdCompressionProvider, reedSolomonFromResponse, sha256 } from "./index";
 
-const input = new TextEncoder().encode("CipherMesh roundtrip payload ".repeat(80));
+const input = new TextEncoder().encode("Horcrux File System roundtrip payload ".repeat(80));
 
 describe("browser processing primitives", () => {
   test("AES-GCM encrypts and decrypts with authenticated metadata", async () => {

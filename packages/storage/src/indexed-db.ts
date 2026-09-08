@@ -2,7 +2,7 @@ import type { ShardTransport, StoredObjectRef } from "./index";
 
 export class IndexedDbShardTransport implements ShardTransport {
   private readonly unavailable = new Set<string>();
-  constructor(readonly nodeIds: readonly string[], private readonly databaseName = "ciphermesh-mock-network") {}
+  constructor(readonly nodeIds: readonly string[], private readonly databaseName = "horcrux-file-system-mock-network") {}
   setNodeAvailable(nodeId: string, available: boolean) { available ? this.unavailable.delete(nodeId) : this.unavailable.add(nodeId); }
   async putShard(nodeId: string, objectId: string, bytes: Uint8Array): Promise<StoredObjectRef> { this.assertOnline(nodeId); await this.transaction("readwrite", (store) => store.put({ key: `${nodeId}:${objectId}`, bytes: bytes.slice() })); return { nodeId, objectId, size: bytes.byteLength, checksum: "" }; }
   async getShard(nodeId: string, objectId: string) { this.assertOnline(nodeId); const record = await this.transaction<{ key: string; bytes: Uint8Array } | undefined>("readonly", (store) => store.get(`${nodeId}:${objectId}`)); if (!record) throw new Error(`Shard not found on ${nodeId}`); return new Uint8Array(record.bytes); }

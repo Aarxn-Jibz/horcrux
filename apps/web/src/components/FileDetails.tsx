@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import type { FileSummary } from "@ciphermesh/shared";
-import type { PipelineStage } from "@ciphermesh/core";
+import type { FileSummary } from "@horcrux-file-system/shared";
+import type { PipelineStage } from "@horcrux-file-system/core";
 import { deleteFile, downloadManifest, getFile } from "../lib/api";
 import { filePipeline, mockStorage } from "../lib/pipeline";
 

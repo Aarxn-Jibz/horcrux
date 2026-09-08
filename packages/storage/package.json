@@ -1,1 +1,1 @@
-{"name":"@ciphermesh/storage","private":true,"type":"module","exports":"./src/index.ts","scripts":{"typecheck":"tsc --noEmit --pretty false","build":"true"}}
+{"name":"@horcrux-file-system/storage","private":true,"type":"module","exports":"./src/index.ts","scripts":{"typecheck":"tsc --noEmit --pretty false","build":"true"}}

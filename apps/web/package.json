@@ -1,5 +1,5 @@
 {
-  "name": "@ciphermesh/web",
+  "name": "@horcrux-file-system/web",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,9 +8,9 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@ciphermesh/core": "workspace:*",
-    "@ciphermesh/shared": "workspace:*",
-    "@ciphermesh/storage": "workspace:*",
+    "@horcrux-file-system/core": "workspace:*",
+    "@horcrux-file-system/shared": "workspace:*",
+    "@horcrux-file-system/storage": "workspace:*",
     "@subspace/reed-solomon-erasure.wasm": "^0.2.5",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
