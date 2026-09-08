@@ -5,3 +5,5 @@ export interface ShardTransport {
   deleteShard(nodeId: string, objectId: string): Promise<void>;
   healthCheck(nodeId: string): Promise<boolean>;
 }
+export * from "./indexed-db";
+export * from "./memory";
