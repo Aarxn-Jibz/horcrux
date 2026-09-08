@@ -24,8 +24,14 @@ export class BrowserFilePipeline {
     progress("splitting-key"); const shares = await this.secrets.splitSecret(encrypted.key, config.keyShares, config.keyThreshold); encrypted.key.fill(0);
     progress("distributing");
     const objects: ObjectPlacement[] = [];
-    for (const [index, bytes] of encoded.shards.entries()) objects.push(await this.storeObject(input.fileId, "shard", index, bytes, nodeIds[index % nodeIds.length]!, index < config.dataShards ? "data" : "parity"));
-    for (const [index, bytes] of shares.entries()) { objects.push(await this.storeObject(input.fileId, "key-share", index, bytes, nodeIds[(index + config.dataShards) % nodeIds.length]!)); bytes.fill(0); }
+    try {
+      for (const [index, bytes] of encoded.shards.entries()) objects.push(await this.storeObject(input.fileId, "shard", index, bytes, nodeIds[index % nodeIds.length]!, index < config.dataShards ? "data" : "parity"));
+      for (const [index, bytes] of shares.entries()) { objects.push(await this.storeObject(input.fileId, "key-share", index, bytes, nodeIds[(index + config.dataShards) % nodeIds.length]!)); bytes.fill(0); }
+    } catch (error) {
+      await Promise.allSettled(objects.map((object) => this.storage.deleteShard(object.nodeId, object.objectId)));
+      shares.forEach((share) => share.fill(0));
+      throw error;
+    }
     progress("complete");
     return { fileId: input.fileId, originalName: input.name, mimeType: input.mimeType || "application/octet-stream", originalSize: input.bytes.byteLength, compressedSize: compressed.byteLength, encryptedSize: encrypted.ciphertext.byteLength, plaintextHash, ciphertextHash, encryptionAlgorithm: "AES-256-GCM", compressionAlgorithm: "zstd", encryptionIv: bytesToBase64Url(encrypted.iv), dataShards: config.dataShards, parityShards: config.parityShards, shardSize: encoded.shardSize, keyShareThreshold: config.keyThreshold, keyShareCount: config.keyShares, objects };
   }

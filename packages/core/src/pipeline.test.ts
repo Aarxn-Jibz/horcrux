@@ -20,4 +20,10 @@ describe("complete browser pipeline", () => {
     for (const share of manifest.objects.filter((item) => item.kind === "key-share").slice(0, 3)) storage.deleteObject(share.nodeId, share.objectId);
     await expect(pipeline.download(manifest)).rejects.toThrow("Insufficient Shamir shares");
   });
+
+  test("rolls back objects after a partial distribution failure", async () => {
+    const { storage, pipeline } = setup(); storage.setNodeAvailable("b", false);
+    await expect(pipeline.upload({ fileId: crypto.randomUUID(), name: "partial.txt", mimeType: "text/plain", bytes: new Uint8Array([1, 2, 3]) }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes)).rejects.toThrow("unavailable");
+    expect(storage.objectCount).toBe(0);
+  });
 });

@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { fileCommitSchema, fileInitSchema } from "@ciphermesh/shared";
+import { z } from "zod";
 import type { Env } from "../env";
 import type { ApiVariables } from "../middleware/auth";
 import { requireAuth } from "../middleware/auth";
@@ -25,6 +26,8 @@ router.post("/init", async (c) => {
 router.post("/:id/complete", async (c) => {
   const file = await getOwnedFile(c.env.DB, c.req.param("id"), c.get("user").id);
   if (file.status !== "uploading") throw new ApiError(409, "invalid_upload_state", "File upload is not awaiting completion");
+  const session = await c.env.DB.prepare("SELECT expires_at,status FROM upload_sessions WHERE file_id=? AND user_id=? ORDER BY created_at DESC LIMIT 1").bind(file.id, c.get("user").id).first<{ expires_at: string; status: string }>();
+  if (!session || session.status === "aborted" || Date.parse(session.expires_at) <= Date.now()) throw new ApiError(409, "upload_expired", "The upload session has expired or was aborted");
   const parsed = fileCommitSchema.safeParse(await c.req.json().catch(() => null)); if (!parsed.success) throw new ApiError(422, "validation_error", parsed.error.issues[0]?.message ?? "Invalid object metadata");
   const input = parsed.data; const shards = input.objects.filter((item) => item.kind === "shard" && item.status === "stored"); const shares = input.objects.filter((item) => item.kind === "key-share" && item.status === "stored");
   if (shards.some((item) => !item.shardType || item.index >= file.rs_data_shards + file.rs_parity_shards) || shares.some((item) => item.index >= file.key_share_count)) throw new ApiError(422, "invalid_object_index", "Shard or key-share metadata is outside the configured range");
@@ -39,6 +42,8 @@ router.post("/:id/complete", async (c) => {
   try { await c.env.DB.batch(statements); } catch { throw new ApiError(422, "metadata_commit_failed", "Shard metadata could not be committed"); }
   return c.json({ fileId: file.id, status: "available" });
 });
+
+router.post("/:id/state", async (c) => { const file = await getOwnedFile(c.env.DB, c.req.param("id"), c.get("user").id); if (file.status !== "uploading") throw new ApiError(409, "invalid_upload_state", "File upload is not active"); const parsed = z.object({ status: z.enum(["distributing", "aborted"]) }).safeParse(await c.req.json().catch(() => null)); if (!parsed.success) throw new ApiError(422, "validation_error", "Invalid upload state"); await c.env.DB.prepare("UPDATE upload_sessions SET status=?,updated_at=datetime('now') WHERE file_id=? AND user_id=? AND status IN ('initialized','distributing')").bind(parsed.data.status, file.id, c.get("user").id).run(); if (parsed.data.status === "aborted") await c.env.DB.prepare("UPDATE files SET status='failed' WHERE id=?").bind(file.id).run(); return c.json({ fileId: file.id, status: parsed.data.status }); });
 
 router.get("/", async (c) => { const result = await c.env.DB.prepare("SELECT * FROM files WHERE owner_user_id=? AND status!='deleted' ORDER BY created_at DESC").bind(c.get("user").id).all<import("../data/files").FileRow>(); return c.json({ files: result.results.map(serializeFile) }); });
 router.get("/:id/download-manifest", async (c) => { const file = await getOwnedFile(c.env.DB, c.req.param("id"), c.get("user").id); if (file.status !== "available") throw new ApiError(409, "file_unavailable", "File is not available for reconstruction"); return c.json({ ...serializeFile(file), objects: await getObjects(c.env.DB, file.id) }); });

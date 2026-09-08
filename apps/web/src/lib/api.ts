@@ -19,8 +19,8 @@ export async function logout() { await request<void>("/auth/logout", { method: "
 export async function listFiles() { return (await request<{ files: FileSummary[] }>("/files")).files; }
 export async function listDevices() { return (await request<{ devices: StorageNodeContract[] }>("/devices")).devices; }
 export function initializeFile(body: unknown) { return request<{ fileId: string; uploadSessionId: string; nodes: StorageNodeContract[] }>("/files/init", { method: "POST", body: JSON.stringify(body) }); }
+export function updateUploadState(fileId: string, status: "distributing" | "aborted") { return request<void>(`/files/${fileId}/state`, { method: "POST", body: JSON.stringify({ status }) }); }
 export function completeFile(fileId: string, manifest: FileManifest) { return request<{ fileId: string; status: string }>(`/files/${fileId}/complete`, { method: "POST", body: JSON.stringify({ compressedSize: manifest.compressedSize, encryptedSize: manifest.encryptedSize, ciphertextHash: manifest.ciphertextHash, encryptionIv: manifest.encryptionIv, shardSize: manifest.shardSize, objects: manifest.objects }) }); }
 export function downloadManifest(fileId: string) { return request<FileManifest>(`/files/${fileId}/download-manifest`); }
 export function getFile(fileId: string) { return request<FileSummary & { objects: FileManifest["objects"] }>(`/files/${fileId}`); }
 export function deleteFile(fileId: string) { return request<void>(`/files/${fileId}`, { method: "DELETE" }); }
-

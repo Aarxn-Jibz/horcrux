@@ -10,6 +10,7 @@ export class MemoryShardTransport implements ShardTransport {
   async deleteShard(nodeId: string, objectId: string) { this.objects.delete(`${nodeId}:${objectId}`); }
   async healthCheck(nodeId: string) { return this.nodeIds.includes(nodeId) && !this.unavailable.has(nodeId); }
   deleteObject(nodeId: string, objectId: string) { this.objects.delete(`${nodeId}:${objectId}`); }
+  get objectCount() { return this.objects.size; }
   corruptObject(nodeId: string, objectId: string) { const bytes = this.objects.get(`${nodeId}:${objectId}`); if (bytes?.length) bytes[0] = bytes[0]! ^ 0xff; }
   private assertOnline(nodeId: string) { if (!this.nodeIds.includes(nodeId) || this.unavailable.has(nodeId)) throw new Error(`Storage node ${nodeId} is unavailable`); }
 }
