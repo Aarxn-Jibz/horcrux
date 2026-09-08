@@ -1,0 +1,13 @@
+import { useState } from "react";
+import { DEFAULT_PIPELINE } from "@ciphermesh/shared";
+import { sha256, type PipelineStage } from "@ciphermesh/core";
+import { completeFile, deleteFile, initializeFile } from "../lib/api";
+import { filePipeline } from "../lib/pipeline";
+import { ProgressSteps } from "./ProgressSteps";
+
+export function UploadPanel({ onComplete }: { onComplete(): void }) {
+  const [file, setFile] = useState<File>(); const [stage, setStage] = useState<PipelineStage | "saving">(); const [error, setError] = useState("");
+  async function upload() { if (!file) return; if (file.size > DEFAULT_PIPELINE.maxFileBytes) { setError("Files are limited to 256 MiB in this memory-based preview."); return; } setError(""); const fileId = crypto.randomUUID(); try { setStage("preparing"); const bytes = new Uint8Array(await file.arrayBuffer()); const plaintextHash = await sha256(bytes); const initialized = await initializeFile({ fileId, originalName: file.name, mimeType: file.type || "application/octet-stream", originalSize: file.size, plaintextHash, dataShards: DEFAULT_PIPELINE.dataShards, parityShards: DEFAULT_PIPELINE.parityShards, keyShareThreshold: DEFAULT_PIPELINE.keyThreshold, keyShareCount: DEFAULT_PIPELINE.keyShares }); const manifest = await filePipeline.upload({ fileId, name: file.name, mimeType: file.type, bytes }, DEFAULT_PIPELINE, initialized.nodes.map((node) => node.id), setStage); setStage("saving"); await completeFile(fileId, manifest); setStage("complete"); setFile(undefined); onComplete(); } catch (cause) { await deleteFile(fileId).catch(() => {}); setError(cause instanceof Error ? cause.message : "Upload failed"); setStage(undefined); } }
+  return <section className="panel upload-panel"><div><p className="eyebrow">New encrypted file</p><h2>Upload to the mesh</h2><p className="muted">Compressed, encrypted, and dispersed entirely in your browser.</p></div><label className="drop-zone"><input type="file" onChange={(event) => setFile(event.target.files?.[0])} disabled={Boolean(stage && stage !== "complete")} /><strong>{file?.name ?? "Choose a file"}</strong><span>{file ? `${(file.size / 1024).toFixed(1)} KiB` : "Up to 256 MiB"}</span></label>{stage && <ProgressSteps current={stage} />}{error && <p className="error" role="alert">{error}</p>}<button className="primary" disabled={!file || Boolean(stage && stage !== "complete")} onClick={upload}>Encrypt & distribute</button></section>;
+}
+
