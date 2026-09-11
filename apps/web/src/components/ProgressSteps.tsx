@@ -1,4 +1,4 @@
-import type { PipelineStage } from "@horcrux-file-system/core";
+import type { PipelineProgressDetail, PipelineStage } from "@horcrux-file-system/core";
 
 type DisplayStage = { label: string; stages: Array<PipelineStage | "saving"> };
 
@@ -31,4 +31,21 @@ export function ProgressSteps({ current, flow = "upload" }: { current: PipelineS
       ))}
     </ol>
   );
+}
+
+export function TimingSummary({ detail }: { detail?: PipelineProgressDetail }) {
+  if (!detail) return null;
+  return (
+    <span className="timing-summary mono">
+      {Object.entries(detail.stageDurationsMs).map(([stage, milliseconds]) => (
+        <span key={stage}>{stage.replace("-", " ")} {formatDuration(milliseconds)}</span>
+      ))}
+      <span>transfer concurrency {detail.maxObservedConcurrency}/{detail.configuredConcurrency}</span>
+      <span>elapsed {formatDuration(detail.elapsedMs)}</span>
+    </span>
+  );
+}
+
+function formatDuration(milliseconds: number) {
+  return milliseconds < 1_000 ? `${Math.round(milliseconds)}ms` : `${(milliseconds / 1_000).toFixed(2)}s`;
 }

@@ -8,6 +8,13 @@ import type { SecretSharingProvider } from "./shamir";
 import { DEFAULT_OPERATION_CONCURRENCY, mapBounded } from "./concurrency";
 
 export type PipelineStage = "preparing" | "compressing" | "encrypting" | "encoding" | "splitting-key" | "distributing" | "locating" | "retrieving" | "reconstructing" | "decrypting" | "decompressing" | "verifying" | "complete";
+export interface PipelineProgressDetail {
+  elapsedMs: number;
+  stageDurationsMs: Partial<Record<PipelineStage, number>>;
+  configuredConcurrency: number;
+  maxObservedConcurrency: number;
+}
+export type PipelineProgress = (stage: PipelineStage, detail: PipelineProgressDetail) => void;
 export interface PipelineConfig { dataShards: number; parityShards: number; keyShares: number; keyThreshold: number }
 export interface UploadInput { fileId: string; name: string; mimeType: string; bytes: Uint8Array; plaintextHash?: string }
 type DistributionTask = { kind: "shard" | "key-share"; index: number; bytes: Uint8Array; nodeId: string; shardType?: "data" | "parity" };
@@ -22,30 +29,31 @@ export class BrowserFilePipeline {
     private readonly operationConcurrency = DEFAULT_OPERATION_CONCURRENCY,
   ) {}
 
-  async upload(input: UploadInput, config: PipelineConfig, nodeIds: string[], progress: (stage: PipelineStage) => void = () => {}): Promise<FileManifest> {
-    progress("preparing");
+  async upload(input: UploadInput, config: PipelineConfig, nodeIds: string[], progress: PipelineProgress = () => {}): Promise<FileManifest> {
+    const telemetry = new PipelineTelemetry(progress, this.operationConcurrency);
+    telemetry.enter("preparing");
     if (nodeIds.length === 0) throw new Error("No storage nodes are configured");
     const originalSize = input.bytes.byteLength;
     const plaintextHash = input.plaintextHash ?? await sha256(input.bytes);
     const aad = new TextEncoder().encode(input.fileId);
-    progress("compressing");
+    telemetry.enter("compressing");
     let compressed = await this.compression.compress(input.bytes);
     const compressedSize = compressed.byteLength;
-    progress("encrypting");
+    telemetry.enter("encrypting");
     let { ciphertext, iv, key } = await this.encryption.encrypt(compressed, aad);
     compressed.fill(0);
     compressed = new Uint8Array(0);
     const encryptedSize = ciphertext.byteLength;
     const ciphertextHash = await sha256(ciphertext);
-    progress("encoding");
+    telemetry.enter("encoding");
     const encoded = await this.erasure.encode(ciphertext, config.dataShards, config.parityShards);
     ciphertext.fill(0);
     ciphertext = new Uint8Array(0);
-    progress("splitting-key");
+    telemetry.enter("splitting-key");
     const shares = await this.secrets.splitSecret(key, config.keyShares, config.keyThreshold);
     key.fill(0);
     key = new Uint8Array(0);
-    progress("distributing");
+    telemetry.enter("distributing");
     const tasks: DistributionTask[] = [
       ...encoded.shards.map((bytes, index) => ({ kind: "shard" as const, index, bytes, nodeId: nodeIds[index % nodeIds.length]!, shardType: index < config.dataShards ? "data" as const : "parity" as const })),
       ...shares.map((bytes, index) => ({ kind: "key-share" as const, index, bytes, nodeId: nodeIds[(index + config.dataShards) % nodeIds.length]! })),
@@ -54,9 +62,14 @@ export class BrowserFilePipeline {
     let objects: ObjectPlacement[];
     try {
       objects = await mapBounded(tasks, async (task) => {
-        const stored = await this.storeObject(input.fileId, task.kind, task.index, task.bytes, task.nodeId, task.shardType);
-        completed.push(stored);
-        return stored;
+        telemetry.operationStarted();
+        try {
+          const stored = await this.storeObject(input.fileId, task.kind, task.index, task.bytes, task.nodeId, task.shardType);
+          completed.push(stored);
+          return stored;
+        } finally {
+          telemetry.operationFinished();
+        }
       }, { concurrency: this.operationConcurrency });
     } catch (error) {
       await mapBounded(completed, async (object) => {
@@ -68,13 +81,14 @@ export class BrowserFilePipeline {
       encoded.shards.forEach((shard) => shard.fill(0));
       tasks.length = 0;
     }
-    progress("complete");
+    telemetry.enter("complete");
     return { fileId: input.fileId, originalName: input.name, mimeType: input.mimeType || "application/octet-stream", originalSize, compressedSize, encryptedSize, plaintextHash, ciphertextHash, encryptionAlgorithm: "AES-256-GCM", compressionAlgorithm: "zstd", encryptionIv: bytesToBase64Url(iv), dataShards: config.dataShards, parityShards: config.parityShards, shardSize: encoded.shardSize, keyShareThreshold: config.keyThreshold, keyShareCount: config.keyShares, objects };
   }
 
-  async download(manifest: FileManifest, progress: (stage: PipelineStage) => void = () => {}): Promise<Uint8Array> {
-    progress("retrieving");
-    const { shards, shares } = await this.retrieveRecoveryMaterial(manifest);
+  async download(manifest: FileManifest, progress: PipelineProgress = () => {}): Promise<Uint8Array> {
+    const telemetry = new PipelineTelemetry(progress, this.operationConcurrency);
+    telemetry.enter("retrieving");
+    const { shards, shares } = await this.retrieveRecoveryMaterial(manifest, telemetry);
     const availableShards = shards.filter(Boolean).length;
     if (availableShards < manifest.dataShards) {
       shares.forEach((share) => share.fill(0));
@@ -86,7 +100,7 @@ export class BrowserFilePipeline {
       shards.forEach((shard) => shard?.fill(0));
       throw new Error(`Insufficient Shamir shares: need ${manifest.keyShareThreshold}, received ${shares.length}`);
     }
-    progress("reconstructing");
+    telemetry.enter("reconstructing");
     let ciphertext = await this.erasure.decode(shards, manifest.dataShards, manifest.parityShards, manifest.encryptedSize);
     shards.fill(null);
     if (await sha256(ciphertext) !== manifest.ciphertextHash) {
@@ -96,7 +110,7 @@ export class BrowserFilePipeline {
     }
     const key = await this.secrets.combineShares(shares.slice(0, manifest.keyShareThreshold));
     shares.forEach((share) => share.fill(0));
-    progress("decrypting");
+    telemetry.enter("decrypting");
     let compressed: Uint8Array;
     try {
       compressed = await this.encryption.decrypt(ciphertext, key, base64UrlToBytes(manifest.encryptionIv), new TextEncoder().encode(manifest.fileId));
@@ -105,23 +119,23 @@ export class BrowserFilePipeline {
       ciphertext.fill(0);
       ciphertext = new Uint8Array(0);
     }
-    progress("decompressing");
+    telemetry.enter("decompressing");
     let restored: Uint8Array;
     try {
       restored = await this.compression.decompress(compressed);
     } finally {
       compressed.fill(0);
     }
-    progress("verifying");
+    telemetry.enter("verifying");
     if (restored.byteLength !== manifest.originalSize || await sha256(restored) !== manifest.plaintextHash) {
       restored.fill(0);
       throw new Error("Restored file failed integrity verification");
     }
-    progress("complete");
+    telemetry.enter("complete");
     return restored;
   }
 
-  private async retrieveRecoveryMaterial(manifest: FileManifest) {
+  private async retrieveRecoveryMaterial(manifest: FileManifest, telemetry: PipelineTelemetry) {
     const shardItems = manifest.objects.filter((object) => object.kind === "shard");
     const shareItems = manifest.objects.filter((object) => object.kind === "key-share");
     const candidates = shardItems.flatMap((shard, index) => [shard, shareItems[index]].filter((item) => item !== undefined));
@@ -141,6 +155,7 @@ export class BrowserFilePipeline {
           const index = nextIndex++;
           const item = candidates[index];
           if (!item) return;
+          telemetry.operationStarted();
           try {
             const bytes = await this.storage.getShard(item.nodeId, item.objectId, controller.signal);
             if (settled) return;
@@ -154,6 +169,8 @@ export class BrowserFilePipeline {
             }
           } catch {
             // Missing, corrupt, and unavailable objects are accounted for by thresholds below.
+          } finally {
+            telemetry.operationFinished();
           }
         }
       } finally {
@@ -174,5 +191,38 @@ export class BrowserFilePipeline {
   private async storeObject(fileId: string, kind: "shard" | "key-share", index: number, bytes: Uint8Array, nodeId: string, shardType?: "data" | "parity"): Promise<ObjectPlacement> {
     const id = crypto.randomUUID(); const objectId = `${fileId}/${kind}/${id}`; const checksum = await sha256(bytes); const stored = await this.storage.putShard(nodeId, objectId, bytes, { checksum });
     return { id, kind, index, nodeId, objectId, size: stored.size, checksum, shardType, status: "stored" };
+  }
+}
+
+class PipelineTelemetry {
+  private readonly startedAt = performance.now();
+  private previousAt = this.startedAt;
+  private current?: PipelineStage;
+  private activeOperations = 0;
+  private maximumOperations = 0;
+  private readonly durations: Partial<Record<PipelineStage, number>> = {};
+
+  constructor(private readonly progress: PipelineProgress, private readonly concurrency: number) {}
+
+  enter(stage: PipelineStage) {
+    const now = performance.now();
+    if (this.current) this.durations[this.current] = (this.durations[this.current] ?? 0) + now - this.previousAt;
+    this.current = stage;
+    this.previousAt = now;
+    this.progress(stage, {
+      elapsedMs: now - this.startedAt,
+      stageDurationsMs: { ...this.durations },
+      configuredConcurrency: this.concurrency,
+      maxObservedConcurrency: this.maximumOperations,
+    });
+  }
+
+  operationStarted() {
+    this.activeOperations += 1;
+    this.maximumOperations = Math.max(this.maximumOperations, this.activeOperations);
+  }
+
+  operationFinished() {
+    this.activeOperations -= 1;
   }
 }

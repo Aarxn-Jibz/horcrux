@@ -54,12 +54,19 @@ describe("complete browser pipeline", () => {
   test("stores every shard and key share with exactly four active writes", async () => {
     const storage = new ObservedStorage(nodes);
     const pipeline = new BrowserFilePipeline(new ZstdCompressionProvider(), new WebCryptoAesGcm(), new WasmReedSolomonProvider(), new AuditedShamirProvider(), storage);
-    const manifest = await pipeline.upload({ fileId: crypto.randomUUID(), name: "parallel.bin", mimeType: "application/octet-stream", bytes: crypto.getRandomValues(new Uint8Array(4096)) }, DEFAULT_PIPELINE, nodes);
+    let finalProgress;
+    const manifest = await pipeline.upload(
+      { fileId: crypto.randomUUID(), name: "parallel.bin", mimeType: "application/octet-stream", bytes: crypto.getRandomValues(new Uint8Array(4096)) },
+      DEFAULT_PIPELINE,
+      nodes,
+      (_stage, detail) => { finalProgress = detail; },
+    );
 
     expect(manifest.objects).toHaveLength(10);
     expect(storage.objectCount).toBe(10);
     expect(storage.maximumPuts).toBeLessThanOrEqual(4);
     expect(storage.maximumPuts).toBe(4);
+    expect(finalProgress).toMatchObject({ configuredConcurrency: 4, maxObservedConcurrency: 4 });
   });
 
   test("retrieves through four runners and cancels unnecessary slow objects", async () => {

@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import type { FileSummary } from "@horcrux-file-system/shared";
-import type { PipelineStage } from "@horcrux-file-system/core";
+import type { PipelineProgressDetail, PipelineStage } from "@horcrux-file-system/core";
 import { deleteFile, downloadManifest, getFile } from "../lib/api";
 import { filePipeline, mockStorage } from "../lib/pipeline";
 import { formatBytes } from "./FileList";
-import { ProgressSteps } from "./ProgressSteps";
+import { ProgressSteps, TimingSummary } from "./ProgressSteps";
 import { OperationError } from "./OperationError";
 import { describeError, type DisplayError } from "../lib/errors";
 
@@ -14,10 +14,12 @@ export function FileDetails({ fileId, onChanged, onClose }: { fileId: string; on
   const [file, setFile] = useState<DetailedFile>();
   const [error, setError] = useState<DisplayError>();
   const [stage, setStage] = useState<PipelineStage>();
+  const [timing, setTiming] = useState<PipelineProgressDetail>();
 
   useEffect(() => {
     setFile(undefined);
     setError(undefined);
+    setTiming(undefined);
     getFile(fileId).then(setFile).catch((cause) => setError(describeError(cause, "Could not load file")));
   }, [fileId]);
 
@@ -26,7 +28,7 @@ export function FileDetails({ fileId, onChanged, onClose }: { fileId: string; on
     try {
       setStage("locating");
       const manifest = await downloadManifest(fileId);
-      const bytes = await filePipeline.download(manifest, setStage);
+      const bytes = await filePipeline.download(manifest, (nextStage, detail) => { setStage(nextStage); setTiming(detail); });
       const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: manifest.mimeType }));
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -64,7 +66,7 @@ export function FileDetails({ fileId, onChanged, onClose }: { fileId: string; on
             <div><dt>Encryption</dt><dd>{file.encryptionAlgorithm}</dd></div>
             <div><dt>Stored objects</dt><dd>{file.objects.length} mock objects</dd></div>
           </dl>
-          <details className="advanced-details"><summary>Advanced details</summary><p>Compression: {file.compressionAlgorithm} · Ciphertext: {formatBytes(file.encryptedSize)} · Client-side authenticated encryption</p></details>
+          <details className="advanced-details"><summary>Advanced details</summary><p>Compression: {file.compressionAlgorithm} · Ciphertext: {formatBytes(file.encryptedSize)} · Client-side authenticated encryption</p><TimingSummary detail={timing} /></details>
           {stage && <ProgressSteps current={stage} flow="download" />}
           {error && <OperationError error={error} />}
           <div className="actions"><button className="primary" disabled={file.status !== "available" || Boolean(stage)} onClick={download}>Download</button><button className="danger" disabled={Boolean(stage)} onClick={remove}>Delete file</button></div>
