@@ -8,10 +8,12 @@
     "dev:api": "bun --cwd apps/api dev",
     "build:web": "bun --cwd apps/web build",
     "build:api": "bun --cwd apps/api build",
+    "build:node": "cd apps/node && go build ./cmd/horcrux-node",
     "build": "bun run --filter '*' build",
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun test",
     "test:js": "bun test",
+    "test:node": "cd apps/node && go test ./...",
     "test:e2e": "bun run scripts/e2e-local.ts",
     "db:migrate:local": "bun --cwd apps/api db:migrate:local"
   },

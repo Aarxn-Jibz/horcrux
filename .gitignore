@@ -5,3 +5,5 @@ dist/
 *.local
 coverage/
 *.tsbuildinfo
+/apps/node/data/
+/apps/node/horcrux-node
