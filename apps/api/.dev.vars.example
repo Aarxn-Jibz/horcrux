@@ -1,2 +1,3 @@
 JWT_SECRET=replace-with-at-least-32-random-bytes
-
+CAPABILITY_PRIVATE_KEY=replace-with-base64url-pkcs8-ed25519-private-key
+CAPABILITY_PUBLIC_KEY=replace-with-base64url-raw-ed25519-public-key

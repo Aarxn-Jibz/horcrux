@@ -12,6 +12,7 @@
     "apps/api": {
       "name": "@horcrux-file-system/api",
       "dependencies": {
+        "@horcrux-file-system/protocol": "workspace:*",
         "@horcrux-file-system/shared": "workspace:*",
         "hono": "^4.9.6",
         "zod": "^4.1.5",

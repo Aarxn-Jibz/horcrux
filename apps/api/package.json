@@ -9,6 +9,7 @@
     "db:migrate:local": "wrangler d1 migrations apply horcrux-file-system --local"
   },
   "dependencies": {
+    "@horcrux-file-system/protocol": "workspace:*",
     "@horcrux-file-system/shared": "workspace:*",
     "hono": "^4.9.6",
     "zod": "^4.1.5"
@@ -18,4 +19,3 @@
     "wrangler": "^4.34.0"
   }
 }
-
