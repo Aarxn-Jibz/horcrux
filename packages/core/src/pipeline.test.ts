@@ -22,6 +22,34 @@ class ObservedStorage extends MemoryShardTransport {
   }
 }
 
+class ObservedRetrievalStorage extends MemoryShardTransport {
+  active = 0;
+  maximum = 0;
+  cancelled = 0;
+
+  override async getShard(nodeId: string, objectId: string, signal?: AbortSignal) {
+    this.active += 1;
+    this.maximum = Math.max(this.maximum, this.active);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onAbort = () => {
+          clearTimeout(timer);
+          this.cancelled += 1;
+          reject(signal?.reason);
+        };
+        const timer = setTimeout(() => {
+          signal?.removeEventListener("abort", onAbort);
+          resolve();
+        }, nodeId === "e" ? 250 : 5);
+        signal?.addEventListener("abort", onAbort, { once: true });
+      });
+      return await super.getShard(nodeId, objectId, signal);
+    } finally {
+      this.active -= 1;
+    }
+  }
+}
+
 describe("complete browser pipeline", () => {
   test("stores every shard and key share with exactly four active writes", async () => {
     const storage = new ObservedStorage(nodes);
@@ -32,6 +60,19 @@ describe("complete browser pipeline", () => {
     expect(storage.objectCount).toBe(10);
     expect(storage.maximumPuts).toBeLessThanOrEqual(4);
     expect(storage.maximumPuts).toBe(4);
+  });
+
+  test("retrieves through four runners and cancels unnecessary slow objects", async () => {
+    const storage = new ObservedRetrievalStorage(nodes);
+    const pipeline = new BrowserFilePipeline(new ZstdCompressionProvider(), new WebCryptoAesGcm(), new WasmReedSolomonProvider(), new AuditedShamirProvider(), storage);
+    const bytes = crypto.getRandomValues(new Uint8Array(12 * 1024));
+    const manifest = await pipeline.upload({ fileId: crypto.randomUUID(), name: "recovery.bin", mimeType: "application/octet-stream", bytes }, DEFAULT_PIPELINE, nodes);
+    const restored = await pipeline.download(manifest);
+
+    expect(await sha256(restored)).toBe(await sha256(bytes));
+    expect(storage.maximum).toBeLessThanOrEqual(4);
+    expect(storage.maximum).toBe(4);
+    expect(storage.cancelled).toBeGreaterThan(0);
   });
 
   test("restores byte-identical content with two nodes unavailable", async () => {

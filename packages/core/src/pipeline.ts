@@ -58,13 +58,10 @@ export class BrowserFilePipeline {
 
   async download(manifest: FileManifest, progress: (stage: PipelineStage) => void = () => {}): Promise<Uint8Array> {
     progress("preparing");
-    const shards: Array<Uint8Array | null> = Array(manifest.dataShards + manifest.parityShards).fill(null);
-    for (const item of manifest.objects.filter((object) => object.kind === "shard")) { try { const bytes = await this.storage.getShard(item.nodeId, item.objectId); if (await sha256(bytes) === item.checksum) shards[item.index] = bytes; } catch {} }
+    const { shards, shares } = await this.retrieveRecoveryMaterial(manifest);
     progress("verifying");
     const availableShards = shards.filter(Boolean).length;
     if (availableShards < manifest.dataShards) throw new Error(`Insufficient Reed-Solomon shards: need ${manifest.dataShards}, received ${availableShards}`);
-    const shares: Uint8Array[] = [];
-    for (const item of manifest.objects.filter((object) => object.kind === "key-share")) { try { const bytes = await this.storage.getShard(item.nodeId, item.objectId); if (await sha256(bytes) === item.checksum) shares.push(bytes); } catch {} }
     if (shares.length < manifest.keyShareThreshold) throw new Error(`Insufficient Shamir shares: need ${manifest.keyShareThreshold}, received ${shares.length}`);
     progress("encoding"); const ciphertext = await this.erasure.decode(shards, manifest.dataShards, manifest.parityShards, manifest.encryptedSize);
     if (await sha256(ciphertext) !== manifest.ciphertextHash) throw new Error("Reconstructed ciphertext failed integrity verification");
@@ -73,6 +70,56 @@ export class BrowserFilePipeline {
     progress("compressing"); const restored = await this.compression.decompress(compressed);
     if (restored.byteLength !== manifest.originalSize || await sha256(restored) !== manifest.plaintextHash) throw new Error("Restored file failed integrity verification");
     progress("complete"); return restored;
+  }
+
+  private async retrieveRecoveryMaterial(manifest: FileManifest) {
+    const shardItems = manifest.objects.filter((object) => object.kind === "shard");
+    const shareItems = manifest.objects.filter((object) => object.kind === "key-share");
+    const candidates = shardItems.flatMap((shard, index) => [shard, shareItems[index]].filter((item) => item !== undefined));
+    const shards: Array<Uint8Array | null> = Array(manifest.dataShards + manifest.parityShards).fill(null);
+    const shares: Uint8Array[] = [];
+    const controller = new AbortController();
+    let nextIndex = 0;
+    let runnerCount = Math.min(this.operationConcurrency, candidates.length);
+    let settled = false;
+    let finish!: () => void;
+    const enoughMaterial = () => shards.filter(Boolean).length >= manifest.dataShards && shares.length >= manifest.keyShareThreshold;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+
+    const run = async () => {
+      try {
+        while (!settled) {
+          const index = nextIndex++;
+          const item = candidates[index];
+          if (!item) return;
+          try {
+            const bytes = await this.storage.getShard(item.nodeId, item.objectId, controller.signal);
+            if (settled) return;
+            if (await sha256(bytes) !== item.checksum || settled) continue;
+            if (item.kind === "shard") shards[item.index] = bytes;
+            else shares.push(bytes);
+            if (enoughMaterial()) {
+              settled = true;
+              controller.abort();
+              finish();
+            }
+          } catch {
+            // Missing, corrupt, and unavailable objects are accounted for by thresholds below.
+          }
+        }
+      } finally {
+        runnerCount -= 1;
+        if (runnerCount === 0 && !settled) {
+          settled = true;
+          finish();
+        }
+      }
+    };
+
+    const runners = Array.from({ length: runnerCount }, run);
+    void Promise.allSettled(runners);
+    await finished;
+    return { shards, shares };
   }
 
   private async storeObject(fileId: string, kind: "shard" | "key-share", index: number, bytes: Uint8Array, nodeId: string, shardType?: "data" | "parity"): Promise<ObjectPlacement> {
