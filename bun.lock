@@ -48,6 +48,12 @@
         "shamir-secret-sharing": "^0.0.4",
       },
     },
+    "packages/protocol": {
+      "name": "@horcrux-file-system/protocol",
+      "dependencies": {
+        "zod": "^4.1.5",
+      },
+    },
     "packages/shared": {
       "name": "@horcrux-file-system/shared",
       "dependencies": {
@@ -98,16 +104,6 @@
     "@babel/types": ["@babel/types@7.29.8", "", { "dependencies": { "@babel/helper-string-parser": "^7.29.7", "@babel/helper-validator-identifier": "^7.29.7" } }, "sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg=="],
 
     "@bokuweb/zstd-wasm": ["@bokuweb/zstd-wasm@0.0.27", "", {}, "sha512-GDm2uOTK3ESjnYmSeLQifJnBsRCWajKLvN32D2ZcQaaCIJI/Hse9s74f7APXjHit95S10UImsRGkTsbwHmrtmg=="],
-
-    "@horcrux-file-system/api": ["@horcrux-file-system/api@workspace:apps/api"],
-
-    "@horcrux-file-system/core": ["@horcrux-file-system/core@workspace:packages/core"],
-
-    "@horcrux-file-system/shared": ["@horcrux-file-system/shared@workspace:packages/shared"],
-
-    "@horcrux-file-system/storage": ["@horcrux-file-system/storage@workspace:packages/storage"],
-
-    "@horcrux-file-system/web": ["@horcrux-file-system/web@workspace:apps/web"],
 
     "@cloudflare/kv-asset-handler": ["@cloudflare/kv-asset-handler@0.5.0", "", {}, "sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg=="],
 
@@ -180,6 +176,18 @@
     "@esbuild/win32-ia32": ["@esbuild/win32-ia32@0.28.1", "", { "os": "win32", "cpu": "ia32" }, "sha512-zvb/mB2bSCoJOpoCBgYKKpX6YM6mJBlBUVUtVj41DlZJVEB6/0CKlRYxP5wWl1C1ILiCoAU5wZZ4q1P3qeS6Eg=="],
 
     "@esbuild/win32-x64": ["@esbuild/win32-x64@0.28.1", "", { "os": "win32", "cpu": "x64" }, "sha512-bm4Mowrv+GXMlpWX++EcXw/iLyd1o3+bJkC2DkWXYVvgZCqD/bSj9ctZeAMC3cIxgjRVR2Dufaiu4YPxr5gW1A=="],
+
+    "@horcrux-file-system/api": ["@horcrux-file-system/api@workspace:apps/api"],
+
+    "@horcrux-file-system/core": ["@horcrux-file-system/core@workspace:packages/core"],
+
+    "@horcrux-file-system/protocol": ["@horcrux-file-system/protocol@workspace:packages/protocol"],
+
+    "@horcrux-file-system/shared": ["@horcrux-file-system/shared@workspace:packages/shared"],
+
+    "@horcrux-file-system/storage": ["@horcrux-file-system/storage@workspace:packages/storage"],
+
+    "@horcrux-file-system/web": ["@horcrux-file-system/web@workspace:apps/web"],
 
     "@img/colour": ["@img/colour@1.1.0", "", {}, "sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ=="],
 

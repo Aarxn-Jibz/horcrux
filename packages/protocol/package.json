@@ -1,0 +1,12 @@
+{
+  "name": "@horcrux-file-system/protocol",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit --pretty false"
+  },
+  "dependencies": {
+    "zod": "^4.1.5"
+  }
+}
