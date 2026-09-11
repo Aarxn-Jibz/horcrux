@@ -173,6 +173,7 @@ header { display: flex; height: 56px; align-items: center; justify-content: spac
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .status-available { color: var(--success); }
 .status-uploading { color: var(--warning); }
+.status-degraded { color: var(--warning); }
 .status-failed, .status-offline { color: var(--error); }
 .status-deleted { color: var(--text-muted); }
 .empty-state { display: grid; min-height: 320px; place-items: center; align-content: center; text-align: center; }
