@@ -5,6 +5,7 @@ import (
 	"flag"
 	"net"
 	"os"
+	"time"
 )
 
 const DefaultMaxConcurrent = 6
@@ -17,6 +18,8 @@ type Config struct {
 	ControlPlanePublicKey string
 	TLSCertificate        string
 	TLSKey                string
+	ControlPlaneURL       string
+	HeartbeatInterval     time.Duration
 }
 
 func Parse(args []string) (Config, error) {
@@ -29,6 +32,8 @@ func Parse(args []string) (Config, error) {
 	set.StringVar(&config.ControlPlanePublicKey, "control-plane-public-key", os.Getenv("HORCRUX_CONTROL_PLANE_PUBLIC_KEY"), "base64url Ed25519 capability verification key")
 	set.StringVar(&config.TLSCertificate, "tls-cert", "", "TLS certificate path")
 	set.StringVar(&config.TLSKey, "tls-key", "", "TLS private key path")
+	set.StringVar(&config.ControlPlaneURL, "control-plane-url", "", "control-plane base URL for outbound heartbeats")
+	set.DurationVar(&config.HeartbeatInterval, "heartbeat-interval", 30*time.Second, "outbound heartbeat interval")
 	if err := set.Parse(args); err != nil {
 		return Config{}, err
 	}
@@ -40,6 +45,9 @@ func Parse(args []string) (Config, error) {
 	}
 	if config.MaxConcurrent < 1 || config.MaxConcurrent > 64 {
 		return Config{}, errors.New("max concurrency must be between 1 and 64")
+	}
+	if config.HeartbeatInterval < 10*time.Second {
+		return Config{}, errors.New("heartbeat interval must be at least 10 seconds")
 	}
 	if config.ControlPlanePublicKey == "" {
 		return Config{}, errors.New("control-plane public key is required")
