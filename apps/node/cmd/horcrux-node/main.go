@@ -10,9 +10,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/horcrux-file-system/horcrux/apps/node/internal/authorization"
 	"github.com/horcrux-file-system/horcrux/apps/node/internal/config"
 	"github.com/horcrux-file-system/horcrux/apps/node/internal/identity"
 	"github.com/horcrux-file-system/horcrux/apps/node/internal/server"
+	"github.com/horcrux-file-system/horcrux/apps/node/internal/storage"
 )
 
 func main() {
@@ -27,7 +29,19 @@ func main() {
 		slog.Error("initialize node identity", "error", err)
 		os.Exit(1)
 	}
-	daemon := server.New(configuration.ListenAddress, configuration.MaxConcurrent, nodeIdentity.NodeID)
+	controlPlanePublicKey, err := authorization.ParsePublicKey(configuration.ControlPlanePublicKey)
+	if err != nil {
+		slog.Error("parse control-plane public key", "error", err)
+		os.Exit(1)
+	}
+	objectStore, err := storage.Open(configuration.DataDirectory, configuration.CapacityBytes)
+	if err != nil {
+		slog.Error("open node storage", "error", err)
+		os.Exit(1)
+	}
+	defer objectStore.Close()
+	verifier := authorization.Verifier{PublicKey: controlPlanePublicKey, NodeID: nodeIdentity.NodeID, Issuer: "horcrux-control-plane"}
+	daemon := server.New(configuration.ListenAddress, configuration.MaxConcurrent, nodeIdentity.NodeID, objectStore, verifier, nodeIdentity, configuration.TLSCertificate, configuration.TLSKey)
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go func() {

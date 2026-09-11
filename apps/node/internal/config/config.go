@@ -3,15 +3,20 @@ package config
 import (
 	"errors"
 	"flag"
+	"net"
+	"os"
 )
 
 const DefaultMaxConcurrent = 6
 
 type Config struct {
-	ListenAddress string
-	DataDirectory string
-	CapacityBytes int64
-	MaxConcurrent int
+	ListenAddress         string
+	DataDirectory         string
+	CapacityBytes         int64
+	MaxConcurrent         int
+	ControlPlanePublicKey string
+	TLSCertificate        string
+	TLSKey                string
 }
 
 func Parse(args []string) (Config, error) {
@@ -21,6 +26,9 @@ func Parse(args []string) (Config, error) {
 	set.StringVar(&config.DataDirectory, "data-dir", "./data", "directory owned by this node")
 	set.Int64Var(&config.CapacityBytes, "capacity-bytes", 100*1024*1024*1024, "maximum object bytes managed by this node")
 	set.IntVar(&config.MaxConcurrent, "max-concurrent", DefaultMaxConcurrent, "maximum concurrent object operations")
+	set.StringVar(&config.ControlPlanePublicKey, "control-plane-public-key", os.Getenv("HORCRUX_CONTROL_PLANE_PUBLIC_KEY"), "base64url Ed25519 capability verification key")
+	set.StringVar(&config.TLSCertificate, "tls-cert", "", "TLS certificate path")
+	set.StringVar(&config.TLSKey, "tls-key", "", "TLS private key path")
 	if err := set.Parse(args); err != nil {
 		return Config{}, err
 	}
@@ -32,6 +40,22 @@ func Parse(args []string) (Config, error) {
 	}
 	if config.MaxConcurrent < 1 || config.MaxConcurrent > 64 {
 		return Config{}, errors.New("max concurrency must be between 1 and 64")
+	}
+	if config.ControlPlanePublicKey == "" {
+		return Config{}, errors.New("control-plane public key is required")
+	}
+	if (config.TLSCertificate == "") != (config.TLSKey == "") {
+		return Config{}, errors.New("TLS certificate and key must be configured together")
+	}
+	if config.TLSCertificate == "" {
+		host, _, err := net.SplitHostPort(config.ListenAddress)
+		if err != nil {
+			return Config{}, errors.New("listen address must include host and port")
+		}
+		ip := net.ParseIP(host)
+		if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return Config{}, errors.New("plain HTTP is restricted to a loopback address; configure TLS for remote access")
+		}
 	}
 	return config, nil
 }
