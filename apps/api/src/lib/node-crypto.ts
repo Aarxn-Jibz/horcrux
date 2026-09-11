@@ -1,5 +1,5 @@
 import { decodeBase64Url, encodeBase64Url, signEnvelope } from "@horcrux-file-system/protocol";
-import type { StorageCapability } from "@horcrux-file-system/protocol";
+import type { StorageCapability, StorageReceipt } from "@horcrux-file-system/protocol";
 
 const encoder = new TextEncoder();
 
@@ -37,4 +37,16 @@ export async function verifyNodeSignature(publicKey: string, payload: Uint8Array
 export async function issueCapability(capability: StorageCapability, privateKey?: string) {
   if (!privateKey) throw new Error("Capability signing key is not configured");
   return signEnvelope(capability, privateKey);
+}
+
+export function receiptMatchesCapability(
+  receipt: StorageReceipt,
+  capability: Pick<StorageCapability, "jti" | "nodeId" | "objectId" | "operation" | "checksum" | "size">,
+) {
+  return capability.operation === "PUT"
+    && receipt.requestId === capability.jti
+    && receipt.nodeId === capability.nodeId
+    && receipt.objectId === capability.objectId
+    && receipt.checksum === capability.checksum
+    && receipt.size === capability.size;
 }

@@ -34,6 +34,11 @@ router.post("/:id/complete", async (c) => {
   if (shards.length < file.rs_data_shards) throw new ApiError(409, "insufficient_shards", `At least ${file.rs_data_shards} stored shards are required`);
   if (shares.length < file.key_share_threshold) throw new ApiError(409, "insufficient_key_shares", `At least ${file.key_share_threshold} stored key shares are required`);
   if (new Set(shards.map((item) => item.index)).size !== shards.length || new Set(shares.map((item) => item.index)).size !== shares.length) throw new ApiError(422, "duplicate_object_index", "Object indexes must be unique");
+  for (const item of input.objects) {
+    const confirmation = await c.env.DB.prepare("SELECT d.public_key,r.id receipt_id FROM devices d LEFT JOIN storage_receipts r ON r.device_id=d.id AND r.object_id=? AND r.checksum=? AND r.size=? AND r.file_id=? WHERE d.id=?").bind(item.objectId, item.checksum, item.size, file.id, item.nodeId).first<{ public_key: string | null; receipt_id: string | null }>();
+    if (!confirmation) throw new ApiError(422, "invalid_storage_node", "Object references an unknown storage node");
+    if (confirmation.public_key && !confirmation.receipt_id) throw new ApiError(409, "storage_receipt_required", "A verified node receipt is required before completing this upload");
+  }
   const statements: D1PreparedStatement[] = [];
   for (const item of shards) { statements.push(c.env.DB.prepare("INSERT INTO shards (id,file_id,shard_index,shard_type,size,checksum,status) VALUES (?,?,?,?,?,?,'stored')").bind(item.id, file.id, item.index, item.shardType, item.size, item.checksum)); statements.push(c.env.DB.prepare("INSERT INTO shard_locations (id,shard_id,device_id,object_id,status,stored_at) VALUES (?,?,?,?,'stored',datetime('now'))").bind(crypto.randomUUID(), item.id, item.nodeId, item.objectId)); }
   for (const item of shares) statements.push(c.env.DB.prepare("INSERT INTO key_shares (id,file_id,share_index,checksum,size,device_id,object_id,status) VALUES (?,?,?,?,?,?,?,'stored')").bind(item.id, file.id, item.index, item.checksum, item.size, item.nodeId, item.objectId));
