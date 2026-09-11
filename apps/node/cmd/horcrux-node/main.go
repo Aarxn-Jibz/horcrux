@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/horcrux-file-system/horcrux/apps/node/internal/config"
+	"github.com/horcrux-file-system/horcrux/apps/node/internal/identity"
 	"github.com/horcrux-file-system/horcrux/apps/node/internal/server"
 )
 
@@ -21,7 +22,12 @@ func main() {
 		os.Exit(2)
 	}
 
-	daemon := server.New(configuration.ListenAddress, configuration.MaxConcurrent)
+	nodeIdentity, err := identity.LoadOrCreate(configuration.DataDirectory)
+	if err != nil {
+		slog.Error("initialize node identity", "error", err)
+		os.Exit(1)
+	}
+	daemon := server.New(configuration.ListenAddress, configuration.MaxConcurrent, nodeIdentity.NodeID)
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go func() {
@@ -31,7 +37,7 @@ func main() {
 		_ = daemon.Shutdown(request)
 	}()
 
-	slog.Info("horcrux node listening", "address", configuration.ListenAddress, "data", configuration.DataDirectory)
+	slog.Info("horcrux node listening", "node_id", nodeIdentity.NodeID, "address", configuration.ListenAddress, "data", configuration.DataDirectory)
 	if err := daemon.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("node stopped unexpectedly", "error", err)
 		os.Exit(1)

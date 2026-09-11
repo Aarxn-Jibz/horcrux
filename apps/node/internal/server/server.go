@@ -12,10 +12,11 @@ const Version = "0.1.0-dev"
 type Server struct {
 	http      *http.Server
 	operation chan struct{}
+	nodeID    string
 }
 
-func New(address string, maxConcurrent int) *Server {
-	server := &Server{operation: make(chan struct{}, maxConcurrent)}
+func New(address string, maxConcurrent int, nodeID string) *Server {
+	server := &Server{operation: make(chan struct{}, maxConcurrent), nodeID: nodeID}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", server.health)
 	server.http = &http.Server{
@@ -49,7 +50,7 @@ func (s *Server) limit(next http.Handler) http.Handler {
 }
 
 func (s *Server) health(writer http.ResponseWriter, _ *http.Request) {
-	writeJSON(writer, http.StatusOK, map[string]any{"status": "online", "version": Version})
+	writeJSON(writer, http.StatusOK, map[string]any{"nodeId": s.nodeID, "status": "online", "version": Version})
 }
 
 func writeJSON(writer http.ResponseWriter, status int, body any) {
