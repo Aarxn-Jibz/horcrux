@@ -12,7 +12,7 @@ Each node generates a long-lived Ed25519 keypair. The private key stays in `iden
 
 The current local mechanism is explicit and portable, not an OS keystore. Protect the node data directory with normal full-disk encryption and account permissions. OS credential-store integration is future hardening.
 
-Enrollment uses an authenticated user-created, random, ten-minute challenge. D1 stores only the token hash. The node signs the exact challenge ID, token, and public key, and Hono atomically records the public key and consumes the challenge. Arbitrary users cannot enroll under another owner, and the bearer token is not permanent.
+Enrollment uses an authenticated user-created, random, ten-minute challenge. D1 stores only the token hash. The node signs the exact challenge ID, token, and public key. Hono conditionally claims the unused challenge before recording the public key, so concurrent replays cannot enroll a second identity. Arbitrary users cannot enroll under another owner, and the bearer token is not permanent.
 
 ## Capabilities
 
