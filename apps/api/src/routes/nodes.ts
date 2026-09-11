@@ -1,6 +1,12 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { PROTOCOL_VERSION, storageReceiptSchema, verifyEnvelope, type StorageCapability } from "@horcrux-file-system/protocol";
+import {
+  heartbeatSchema,
+  PROTOCOL_VERSION,
+  storageReceiptSchema,
+  verifyEnvelope,
+  type StorageCapability,
+} from "@horcrux-file-system/protocol";
 import type { Env } from "../env";
 import type { ApiVariables } from "../middleware/auth";
 import { requireAuth } from "../middleware/auth";
@@ -40,6 +46,43 @@ router.post("/enroll", async (c) => {
     throw new ApiError(409, "node_already_enrolled", "This node identity is already enrolled");
   }
   return c.json({ nodeId, publicKey: input.publicKey, status: "offline" }, 201);
+});
+
+router.post("/:id/heartbeat", async (c) => {
+  const body = z.object({ heartbeat: z.string().min(80).max(4096) }).safeParse(
+    await c.req.json().catch(() => null),
+  );
+  if (!body.success) throw new ApiError(422, "validation_error", "Invalid heartbeat submission");
+
+  const node = await c.env.DB.prepare(
+    "SELECT id,public_key FROM devices WHERE id=? AND public_key IS NOT NULL",
+  ).bind(c.req.param("id")).first<NodeRow>();
+  if (!node) throw new ApiError(404, "node_not_found", "Storage node not found");
+
+  const heartbeat = await verifyEnvelope(body.data.heartbeat, node.public_key, heartbeatSchema)
+    .catch(() => { throw new ApiError(401, "heartbeat_invalid", "Node heartbeat signature is invalid"); });
+  const now = Math.floor(Date.now() / 1000);
+  if (heartbeat.nodeId !== node.id || heartbeat.timestamp < now - 2 * 60 || heartbeat.timestamp > now + 60) {
+    throw new ApiError(422, "heartbeat_stale", "Node heartbeat scope or timestamp is invalid");
+  }
+  if (heartbeat.usedBytes + heartbeat.availableBytes > heartbeat.capacityBytes) {
+    throw new ApiError(422, "heartbeat_capacity_invalid", "Node heartbeat capacity values are inconsistent");
+  }
+
+  await c.env.DB.prepare(
+    "UPDATE devices SET status=?,storage_capacity=?,storage_used=?,available_storage=?,node_version=?,protocol_version=?,health=?,last_seen=datetime('now') WHERE id=?",
+  ).bind(
+    heartbeat.status,
+    heartbeat.capacityBytes,
+    heartbeat.usedBytes,
+    heartbeat.availableBytes,
+    heartbeat.nodeVersion,
+    heartbeat.version,
+    heartbeat.status === "online" ? "healthy" : "degraded",
+    node.id,
+  ).run();
+
+  return c.json({ accepted: true, nodeId: node.id });
 });
 
 router.post("/:id/capabilities", requireAuth, async (c) => {

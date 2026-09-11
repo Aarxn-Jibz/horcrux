@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { storageCapabilitySchema, type StorageCapability } from "./index";
+import { heartbeatSchema, storageCapabilitySchema, type NodeHeartbeat, type StorageCapability } from "./index";
 import { encodeBase64Url, signEnvelope, verifyEnvelope } from "./envelope";
 
 describe("signed protocol envelopes", () => {
@@ -12,5 +12,23 @@ describe("signed protocol envelopes", () => {
 
     expect(await verifyEnvelope(token, publicKey, storageCapabilitySchema)).toEqual(capability);
     await expect(verifyEnvelope(token + "x", publicKey, storageCapabilitySchema)).rejects.toThrow("verification failed");
+  });
+
+  test("verifies signed node heartbeat metadata", async () => {
+    const keys = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
+    const privateKey = encodeBase64Url(new Uint8Array(await crypto.subtle.exportKey("pkcs8", keys.privateKey)));
+    const publicKey = encodeBase64Url(new Uint8Array(await crypto.subtle.exportKey("raw", keys.publicKey)));
+    const heartbeat = {
+      version: "1",
+      nodeId: "node-a",
+      status: "online",
+      capacityBytes: 1_000,
+      usedBytes: 400,
+      availableBytes: 600,
+      nodeVersion: "0.1.0",
+      timestamp: 2_000_000_000,
+    } satisfies NodeHeartbeat;
+
+    expect(await verifyEnvelope(await signEnvelope(heartbeat, privateKey), publicKey, heartbeatSchema)).toEqual(heartbeat);
   });
 });

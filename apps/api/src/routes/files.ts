@@ -14,7 +14,19 @@ router.post("/init", async (c) => {
   const parsed = fileInitSchema.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) throw new ApiError(422, "validation_error", parsed.error.issues[0]?.message ?? "Invalid file metadata");
   const input = parsed.data; const user = c.get("user"); const sessionId = crypto.randomUUID(); const expiresAt = new Date(Date.now() + 24 * 3600_000).toISOString();
-  const nodes = await c.env.DB.prepare("SELECT id,public_identifier,name,status,storage_capacity,storage_used,last_seen FROM devices WHERE status IN ('online','degraded') ORDER BY storage_used * 1.0 / MAX(storage_capacity,1), id LIMIT 32").all();
+  const nodes = await c.env.DB.prepare(`
+    SELECT id,public_identifier,name,status,storage_capacity,storage_used,available_storage,last_seen,protocol_version
+    FROM devices
+    WHERE (owner_user_id=? OR owner_user_id IS NULL)
+      AND status IN ('online','degraded')
+      AND available_storage > 0
+      AND (
+        public_key IS NULL
+        OR (health IN ('healthy','degraded') AND protocol_version='1' AND last_seen >= datetime('now','-2 minutes'))
+      )
+    ORDER BY storage_used * 1.0 / MAX(storage_capacity,1), id
+    LIMIT 32
+  `).bind(user.id).all();
   if (nodes.results.length === 0) throw new ApiError(409, "no_storage_nodes", "No storage nodes are currently available");
   try { await c.env.DB.batch([
     c.env.DB.prepare("INSERT INTO files (id,owner_user_id,original_name,mime_type,original_size,plaintext_hash,status,rs_data_shards,rs_parity_shards,key_share_threshold,key_share_count) VALUES (?,?,?,?,?,?,'uploading',?,?,?,?)").bind(input.fileId, user.id, input.originalName, input.mimeType, input.originalSize, input.plaintextHash, input.dataShards, input.parityShards, input.keyShareThreshold, input.keyShareCount),
