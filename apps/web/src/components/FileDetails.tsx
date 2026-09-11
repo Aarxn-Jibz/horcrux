@@ -4,23 +4,27 @@ import type { PipelineStage } from "@horcrux-file-system/core";
 import { deleteFile, downloadManifest, getFile } from "../lib/api";
 import { filePipeline, mockStorage } from "../lib/pipeline";
 import { formatBytes } from "./FileList";
+import { ProgressSteps } from "./ProgressSteps";
+import { OperationError } from "./OperationError";
+import { describeError, type DisplayError } from "../lib/errors";
 
 type DetailedFile = FileSummary & { objects: unknown[] };
 
 export function FileDetails({ fileId, onChanged, onClose }: { fileId: string; onChanged(): void; onClose(): void }) {
   const [file, setFile] = useState<DetailedFile>();
-  const [error, setError] = useState("");
+  const [error, setError] = useState<DisplayError>();
   const [stage, setStage] = useState<PipelineStage>();
 
   useEffect(() => {
     setFile(undefined);
-    setError("");
-    getFile(fileId).then(setFile).catch((cause) => setError(cause instanceof Error ? cause.message : "Could not load file"));
+    setError(undefined);
+    getFile(fileId).then(setFile).catch((cause) => setError(describeError(cause, "Could not load file")));
   }, [fileId]);
 
   async function download() {
-    setError("");
+    setError(undefined);
     try {
+      setStage("locating");
       const manifest = await downloadManifest(fileId);
       const bytes = await filePipeline.download(manifest, setStage);
       const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: manifest.mimeType }));
@@ -30,7 +34,7 @@ export function FileDetails({ fileId, onChanged, onClose }: { fileId: string; on
       anchor.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Reconstruction failed");
+      setError(describeError(cause, "Reconstruction failed"));
     } finally {
       setStage(undefined);
     }
@@ -61,12 +65,12 @@ export function FileDetails({ fileId, onChanged, onClose }: { fileId: string; on
             <div><dt>Stored objects</dt><dd>{file.objects.length} mock objects</dd></div>
           </dl>
           <details className="advanced-details"><summary>Advanced details</summary><p>Compression: {file.compressionAlgorithm} · Ciphertext: {formatBytes(file.encryptedSize)} · Client-side authenticated encryption</p></details>
-          {stage && <p className="working">Retrieving file: {stage.replace("-", " ")}…</p>}
-          {error && <p className="error" role="alert">{error}</p>}
+          {stage && <ProgressSteps current={stage} flow="download" />}
+          {error && <OperationError error={error} />}
           <div className="actions"><button className="primary" disabled={file.status !== "available" || Boolean(stage)} onClick={download}>Download</button><button className="danger" disabled={Boolean(stage)} onClick={remove}>Delete file</button></div>
         </>
       )}
-      {!file && error && <p className="error" role="alert">{error}</p>}
+      {!file && error && <OperationError error={error} />}
     </aside>
   );
 }

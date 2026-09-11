@@ -7,7 +7,7 @@ import type { ErasureCodingProvider } from "./reed-solomon";
 import type { SecretSharingProvider } from "./shamir";
 import { DEFAULT_OPERATION_CONCURRENCY, mapBounded } from "./concurrency";
 
-export type PipelineStage = "preparing" | "compressing" | "encrypting" | "encoding" | "splitting-key" | "distributing" | "verifying" | "complete";
+export type PipelineStage = "preparing" | "compressing" | "encrypting" | "encoding" | "splitting-key" | "distributing" | "locating" | "retrieving" | "reconstructing" | "decrypting" | "decompressing" | "verifying" | "complete";
 export interface PipelineConfig { dataShards: number; parityShards: number; keyShares: number; keyThreshold: number }
 export interface UploadInput { fileId: string; name: string; mimeType: string; bytes: Uint8Array; plaintextHash?: string }
 type DistributionTask = { kind: "shard" | "key-share"; index: number; bytes: Uint8Array; nodeId: string; shardType?: "data" | "parity" };
@@ -73,9 +73,8 @@ export class BrowserFilePipeline {
   }
 
   async download(manifest: FileManifest, progress: (stage: PipelineStage) => void = () => {}): Promise<Uint8Array> {
-    progress("preparing");
+    progress("retrieving");
     const { shards, shares } = await this.retrieveRecoveryMaterial(manifest);
-    progress("verifying");
     const availableShards = shards.filter(Boolean).length;
     if (availableShards < manifest.dataShards) {
       shares.forEach((share) => share.fill(0));
@@ -87,7 +86,7 @@ export class BrowserFilePipeline {
       shards.forEach((shard) => shard?.fill(0));
       throw new Error(`Insufficient Shamir shares: need ${manifest.keyShareThreshold}, received ${shares.length}`);
     }
-    progress("encoding");
+    progress("reconstructing");
     let ciphertext = await this.erasure.decode(shards, manifest.dataShards, manifest.parityShards, manifest.encryptedSize);
     shards.fill(null);
     if (await sha256(ciphertext) !== manifest.ciphertextHash) {
@@ -95,10 +94,9 @@ export class BrowserFilePipeline {
       shares.forEach((share) => share.fill(0));
       throw new Error("Reconstructed ciphertext failed integrity verification");
     }
-    progress("splitting-key");
     const key = await this.secrets.combineShares(shares.slice(0, manifest.keyShareThreshold));
     shares.forEach((share) => share.fill(0));
-    progress("encrypting");
+    progress("decrypting");
     let compressed: Uint8Array;
     try {
       compressed = await this.encryption.decrypt(ciphertext, key, base64UrlToBytes(manifest.encryptionIv), new TextEncoder().encode(manifest.fileId));
@@ -107,13 +105,14 @@ export class BrowserFilePipeline {
       ciphertext.fill(0);
       ciphertext = new Uint8Array(0);
     }
-    progress("compressing");
+    progress("decompressing");
     let restored: Uint8Array;
     try {
       restored = await this.compression.decompress(compressed);
     } finally {
       compressed.fill(0);
     }
+    progress("verifying");
     if (restored.byteLength !== manifest.originalSize || await sha256(restored) !== manifest.plaintextHash) {
       restored.fill(0);
       throw new Error("Restored file failed integrity verification");

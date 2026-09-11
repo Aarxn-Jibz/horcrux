@@ -5,20 +5,22 @@ import { completeFile, deleteFile, initializeFile, updateUploadState } from "../
 import { filePipeline } from "../lib/pipeline";
 import { formatBytes } from "./FileList";
 import { ProgressSteps } from "./ProgressSteps";
+import { OperationError } from "./OperationError";
+import { describeError, type DisplayError } from "../lib/errors";
 
 export function UploadPanel({ onComplete }: { onComplete(): void }) {
   const details = useRef<HTMLDetailsElement>(null);
   const [file, setFile] = useState<File>();
   const [stage, setStage] = useState<PipelineStage | "saving">();
-  const [error, setError] = useState("");
+  const [error, setError] = useState<DisplayError>();
 
   async function upload() {
     if (!file) return;
     if (file.size > DEFAULT_PIPELINE.maxFileBytes) {
-      setError("This browser pipeline currently supports files up to 256 MiB.");
+      setError({ message: "This browser pipeline currently supports files up to 256 MiB." });
       return;
     }
-    setError("");
+    setError(undefined);
     const fileId = crypto.randomUUID();
     try {
       setStage("preparing");
@@ -38,7 +40,7 @@ export function UploadPanel({ onComplete }: { onComplete(): void }) {
     } catch (cause) {
       await updateUploadState(fileId, "aborted").catch(() => {});
       await deleteFile(fileId).catch(() => {});
-      setError(cause instanceof Error ? cause.message : "Upload failed");
+      setError(describeError(cause, "Upload failed"));
       setStage(undefined);
     }
   }
@@ -54,7 +56,8 @@ export function UploadPanel({ onComplete }: { onComplete(): void }) {
           <span>{file ? formatBytes(file.size) : "Maximum 256 MiB"}</span>
         </label>
         {stage && <ProgressSteps current={stage} />}
-        {error && <p className="error" role="alert">{error}</p>}
+        <details className="advanced-details transfer-details"><summary>Advanced details</summary><p>zstd level 3 · AES-256-GCM · RS 3+2 · Shamir 3-of-5{stage ? ` · Active: ${stage.replace("-", " ")}` : ""}</p></details>
+        {error && <OperationError error={error} />}
         <button className="primary upload-submit" disabled={!file || Boolean(stage)} onClick={upload}>Secure and distribute</button>
       </section>
     </details>

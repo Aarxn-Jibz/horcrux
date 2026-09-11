@@ -68,6 +68,9 @@ code, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
 .text-button { border: 0; background: transparent; color: var(--text-secondary); }
 .text-button:hover:not(:disabled) { color: var(--text-primary); }
 .error { margin-bottom: var(--space-4); border: 1px solid color-mix(in srgb, var(--error) 30%, transparent); border-radius: var(--radius-sm); padding: var(--space-3); background: color-mix(in srgb, var(--error) 7%, transparent); color: #ffaaaa; font-size: .8125rem; line-height: 1.45; }
+.error details { margin-top: var(--space-2); color: var(--text-muted); font-size: .6875rem; }
+.error summary { width: max-content; cursor: pointer; }
+.error code { display: block; margin-top: var(--space-2); overflow-wrap: anywhere; white-space: normal; }
 .panel { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-secondary); }
 
 /* Transitional layout rules; feature-level styling is kept near focused UI changes. */
@@ -124,7 +127,8 @@ header { display: flex; height: 56px; align-items: center; justify-content: spac
 .node-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
 .node-list .offline { opacity: .5; }
 .node-list .offline .node-dot { background: var(--error); }
-.progress-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-2); margin: var(--space-5) 0; padding: 0; list-style: none; }
+.progress-steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--space-2); margin: var(--space-5) 0; padding: 0; list-style: none; }
+.progress-download { grid-template-columns: repeat(6, 1fr); }
 .progress-steps li { display: grid; gap: var(--space-1); color: var(--text-muted); font-size: .6875rem; }
 .progress-steps li span { display: grid; height: 20px; place-items: center; border-radius: var(--radius-sm); background: var(--bg-tertiary); }
 .progress-steps .active, .progress-steps .done { color: var(--text-secondary); }
@@ -196,6 +200,7 @@ header { display: flex; height: 56px; align-items: center; justify-content: spac
 .advanced-details { margin-bottom: var(--space-5); color: var(--text-muted); font-size: .75rem; }
 .advanced-details summary { width: max-content; color: var(--text-secondary); cursor: pointer; }
 .advanced-details p { margin: var(--space-3) 0 0; }
+.transfer-details { margin-top: var(--space-4); }
 
 .development-notice { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); border-left: 2px solid var(--warning); padding: var(--space-2) var(--space-3); color: var(--text-muted); font-size: .75rem; }
 .development-notice strong { color: var(--warning); font-weight: 500; }
