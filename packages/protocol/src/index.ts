@@ -22,12 +22,6 @@ export const storageCapabilitySchema = z.object({
 }).refine((value) => value.expiresAt > value.issuedAt, "capability must expire after issuance");
 export type StorageCapability = z.infer<typeof storageCapabilitySchema>;
 
-export interface SignedEnvelope {
-  payload: string;
-  signature: string;
-  keyId: string;
-}
-
 export const storageReceiptSchema = z.object({
   version: z.literal(PROTOCOL_VERSION),
   nodeId: identifier,
@@ -54,11 +48,12 @@ export type NodeHeartbeat = z.infer<typeof heartbeatSchema>;
 export const enrollmentChallengeSchema = z.object({
   challengeId: z.uuid(),
   token: z.string().min(32).max(512),
-  expiresAt: z.int().positive(),
+  expiresAt: z.iso.datetime(),
 });
 
 export const enrollmentProofSchema = z.object({
   challengeId: z.uuid(),
+  token: z.string().min(32).max(512),
   publicKey: z.string().min(40).max(128),
   signature: z.string().min(40).max(128),
   name: z.string().min(1).max(128),

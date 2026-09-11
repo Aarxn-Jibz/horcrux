@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { heartbeatSchema, storageCapabilitySchema, type NodeHeartbeat, type StorageCapability } from "./index";
+import { enrollmentChallengeSchema, enrollmentProofSchema, heartbeatSchema, storageCapabilitySchema, type NodeHeartbeat, type StorageCapability } from "./index";
 import { encodeBase64Url, signEnvelope, verifyEnvelope } from "./envelope";
 
 describe("signed protocol envelopes", () => {
@@ -30,5 +30,12 @@ describe("signed protocol envelopes", () => {
     } satisfies NodeHeartbeat;
 
     expect(await verifyEnvelope(await signEnvelope(heartbeat, privateKey), publicKey, heartbeatSchema)).toEqual(heartbeat);
+  });
+
+  test("keeps enrollment challenges short-lived and self-contained", () => {
+    const challengeId = crypto.randomUUID();
+    expect(enrollmentChallengeSchema.parse({ challengeId, token: "x".repeat(32), expiresAt: "2030-01-01T00:00:00.000Z" })).toBeTruthy();
+    expect(enrollmentProofSchema.parse({ challengeId, token: "x".repeat(32), publicKey: "p".repeat(43), signature: "s".repeat(86), name: "Laptop", capacityBytes: 1_000 })).toBeTruthy();
+    expect(() => enrollmentProofSchema.parse({ challengeId, publicKey: "p".repeat(43), signature: "s".repeat(86), name: "Laptop", capacityBytes: 1_000 })).toThrow();
   });
 });
