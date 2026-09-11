@@ -1,4 +1,5 @@
 import { z } from "zod";
+export * from "./envelope";
 
 export const PROTOCOL_VERSION = "1" as const;
 export const objectOperationSchema = z.enum(["PUT", "GET", "DELETE"]);
