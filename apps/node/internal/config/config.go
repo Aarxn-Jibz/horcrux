@@ -20,6 +20,9 @@ type Config struct {
 	TLSKey                string
 	ControlPlaneURL       string
 	HeartbeatInterval     time.Duration
+	EnrollmentChallenge   string
+	EnrollmentToken       string
+	NodeName              string
 }
 
 func Parse(args []string) (Config, error) {
@@ -34,6 +37,9 @@ func Parse(args []string) (Config, error) {
 	set.StringVar(&config.TLSKey, "tls-key", "", "TLS private key path")
 	set.StringVar(&config.ControlPlaneURL, "control-plane-url", "", "control-plane base URL for outbound heartbeats")
 	set.DurationVar(&config.HeartbeatInterval, "heartbeat-interval", 30*time.Second, "outbound heartbeat interval")
+	set.StringVar(&config.EnrollmentChallenge, "enrollment-challenge", "", "short-lived enrollment challenge ID")
+	set.StringVar(&config.EnrollmentToken, "enrollment-token", os.Getenv("HORCRUX_ENROLLMENT_TOKEN"), "short-lived enrollment token (prefer HORCRUX_ENROLLMENT_TOKEN)")
+	set.StringVar(&config.NodeName, "node-name", "Horcrux laptop", "display name used during enrollment")
 	if err := set.Parse(args); err != nil {
 		return Config{}, err
 	}
@@ -51,6 +57,12 @@ func Parse(args []string) (Config, error) {
 	}
 	if config.ControlPlanePublicKey == "" {
 		return Config{}, errors.New("control-plane public key is required")
+	}
+	if (config.EnrollmentChallenge == "") != (config.EnrollmentToken == "") {
+		return Config{}, errors.New("enrollment challenge and token must be configured together")
+	}
+	if config.EnrollmentChallenge != "" && config.ControlPlaneURL == "" {
+		return Config{}, errors.New("control-plane URL is required for enrollment")
 	}
 	if (config.TLSCertificate == "") != (config.TLSKey == "") {
 		return Config{}, errors.New("TLS certificate and key must be configured together")

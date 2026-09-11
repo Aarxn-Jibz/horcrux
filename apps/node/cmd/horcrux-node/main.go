@@ -12,6 +12,7 @@ import (
 
 	"github.com/horcrux-file-system/horcrux/apps/node/internal/authorization"
 	"github.com/horcrux-file-system/horcrux/apps/node/internal/config"
+	"github.com/horcrux-file-system/horcrux/apps/node/internal/enrollment"
 	"github.com/horcrux-file-system/horcrux/apps/node/internal/heartbeat"
 	"github.com/horcrux-file-system/horcrux/apps/node/internal/identity"
 	"github.com/horcrux-file-system/horcrux/apps/node/internal/server"
@@ -34,6 +35,29 @@ func main() {
 	if err != nil {
 		slog.Error("parse control-plane public key", "error", err)
 		os.Exit(1)
+	}
+	if configuration.EnrollmentChallenge != "" {
+		enrollmentContext, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		response, enrollmentError := enrollment.Enroll(enrollmentContext, enrollment.Request{
+			ControlPlaneURL: configuration.ControlPlaneURL,
+			ChallengeID:     configuration.EnrollmentChallenge,
+			Token:           configuration.EnrollmentToken,
+			Name:            configuration.NodeName,
+			CapacityBytes:   configuration.CapacityBytes,
+			Identity:        nodeIdentity,
+		})
+		cancel()
+		configuration.EnrollmentToken = ""
+		_ = os.Unsetenv("HORCRUX_ENROLLMENT_TOKEN")
+		if enrollmentError != nil {
+			slog.Error("enroll node", "error", enrollmentError)
+			os.Exit(1)
+		}
+		if response.NodeID != nodeIdentity.NodeID {
+			slog.Error("enrollment returned a different node identity")
+			os.Exit(1)
+		}
+		slog.Info("node enrolled", "node_id", response.NodeID)
 	}
 	objectStore, err := storage.Open(configuration.DataDirectory, configuration.CapacityBytes)
 	if err != nil {
