@@ -172,7 +172,7 @@ export class BrowserFilePipeline {
   }
 
   private async storeObject(fileId: string, kind: "shard" | "key-share", index: number, bytes: Uint8Array, nodeId: string, shardType?: "data" | "parity"): Promise<ObjectPlacement> {
-    const id = crypto.randomUUID(); const objectId = `${fileId}/${kind}/${id}`; const checksum = await sha256(bytes); const stored = await this.storage.putShard(nodeId, objectId, bytes);
+    const id = crypto.randomUUID(); const objectId = `${fileId}/${kind}/${id}`; const checksum = await sha256(bytes); const stored = await this.storage.putShard(nodeId, objectId, bytes, { checksum });
     return { id, kind, index, nodeId, objectId, size: stored.size, checksum, shardType, status: "stored" };
   }
 }
