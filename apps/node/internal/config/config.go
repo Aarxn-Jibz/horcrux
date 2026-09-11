@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"net"
+	"net/url"
 	"os"
 	"time"
 )
@@ -23,6 +24,7 @@ type Config struct {
 	EnrollmentChallenge   string
 	EnrollmentToken       string
 	NodeName              string
+	WebOrigin             string
 }
 
 func Parse(args []string) (Config, error) {
@@ -40,6 +42,7 @@ func Parse(args []string) (Config, error) {
 	set.StringVar(&config.EnrollmentChallenge, "enrollment-challenge", "", "short-lived enrollment challenge ID")
 	set.StringVar(&config.EnrollmentToken, "enrollment-token", os.Getenv("HORCRUX_ENROLLMENT_TOKEN"), "short-lived enrollment token (prefer HORCRUX_ENROLLMENT_TOKEN)")
 	set.StringVar(&config.NodeName, "node-name", "Horcrux laptop", "display name used during enrollment")
+	set.StringVar(&config.WebOrigin, "web-origin", "http://localhost:5173", "exact browser origin allowed to access this node")
 	if err := set.Parse(args); err != nil {
 		return Config{}, err
 	}
@@ -57,6 +60,10 @@ func Parse(args []string) (Config, error) {
 	}
 	if config.ControlPlanePublicKey == "" {
 		return Config{}, errors.New("control-plane public key is required")
+	}
+	webOrigin, err := url.Parse(config.WebOrigin)
+	if err != nil || (webOrigin.Scheme != "http" && webOrigin.Scheme != "https") || webOrigin.Host == "" || webOrigin.Path != "" {
+		return Config{}, errors.New("web origin must be an absolute HTTP(S) origin without a path")
 	}
 	if (config.EnrollmentChallenge == "") != (config.EnrollmentToken == "") {
 		return Config{}, errors.New("enrollment challenge and token must be configured together")

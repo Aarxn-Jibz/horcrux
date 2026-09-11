@@ -37,3 +37,9 @@ func TestEnrollmentConfigurationIsAllOrNothing(t *testing.T) {
 		t.Fatalf("complete enrollment configuration was rejected: %v", err)
 	}
 }
+
+func TestRejectsInvalidBrowserOrigin(t *testing.T) {
+	if _, err := Parse([]string{"--control-plane-public-key", "test-key", "--web-origin", "https://app.example/path"}); err == nil {
+		t.Fatal("browser origin with a path was accepted")
+	}
+}

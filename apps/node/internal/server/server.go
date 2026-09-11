@@ -26,17 +26,40 @@ type Server struct {
 	receiptSigner  receipt.PayloadSigner
 	tlsCertificate string
 	tlsKey         string
+	allowedOrigin  string
 }
 
-func New(address string, maxConcurrent int, nodeID string, objects *storage.Store, verifier authorization.Verifier, receiptSigner receipt.PayloadSigner, tlsCertificate, tlsKey string) *Server {
-	server := &Server{operation: make(chan struct{}, maxConcurrent), nodeID: nodeID, objects: objects, verifier: verifier, receiptSigner: receiptSigner, tlsCertificate: tlsCertificate, tlsKey: tlsKey}
+func New(address string, maxConcurrent int, nodeID string, objects *storage.Store, verifier authorization.Verifier, receiptSigner receipt.PayloadSigner, tlsCertificate, tlsKey, allowedOrigin string) *Server {
+	server := &Server{operation: make(chan struct{}, maxConcurrent), nodeID: nodeID, objects: objects, verifier: verifier, receiptSigner: receiptSigner, tlsCertificate: tlsCertificate, tlsKey: tlsKey, allowedOrigin: allowedOrigin}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", server.health)
 	mux.HandleFunc("PUT /objects/{objectID...}", server.putObject)
 	mux.HandleFunc("GET /objects/{objectID...}", server.getObject)
 	mux.HandleFunc("DELETE /objects/{objectID...}", server.deleteObject)
-	server.http = &http.Server{Addr: address, Handler: server.limit(mux), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, WriteTimeout: 5 * time.Minute}
+	server.http = &http.Server{Addr: address, Handler: server.cors(server.limit(mux)), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, WriteTimeout: 5 * time.Minute}
 	return server
+}
+
+func (s *Server) cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		origin := request.Header.Get("Origin")
+		if origin != "" && origin != s.allowedOrigin {
+			writeError(writer, http.StatusForbidden, "origin_forbidden", "Browser origin is not allowed", false)
+			return
+		}
+		if origin != "" {
+			writer.Header().Set("Access-Control-Allow-Origin", origin)
+			writer.Header().Set("Access-Control-Allow-Methods", "GET, PUT, DELETE, OPTIONS")
+			writer.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			writer.Header().Set("Access-Control-Expose-Headers", "X-Object-Checksum")
+			writer.Header().Set("Vary", "Origin")
+		}
+		if request.Method == http.MethodOptions {
+			writer.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(writer, request)
+	})
 }
 
 func (s *Server) Handler() http.Handler {

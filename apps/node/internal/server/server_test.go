@@ -42,7 +42,7 @@ func setupNode(t *testing.T) testNode {
 	t.Cleanup(func() { _ = store.Close() })
 	now := time.Unix(2_000_000_000, 0)
 	verifier := authorization.Verifier{PublicKey: publicKey, NodeID: nodeIdentity.NodeID, Issuer: "horcrux-control-plane", Now: func() time.Time { return now }}
-	return testNode{server: New("127.0.0.1:0", 6, nodeIdentity.NodeID, store, verifier, nodeIdentity, "", ""), controlKey: privateKey, identity: nodeIdentity, now: now}
+	return testNode{server: New("127.0.0.1:0", 6, nodeIdentity.NodeID, store, verifier, nodeIdentity, "", "", "https://app.example"), controlKey: privateKey, identity: nodeIdentity, now: now}
 }
 
 func objectChecksum(data []byte) string {
@@ -134,5 +134,24 @@ func TestObjectAPIRejectsChecksumMismatch(t *testing.T) {
 	response := perform(node.server.Handler(), http.MethodPut, "/objects/"+objectID, node.capability(t, "PUT", objectID, expected), []byte("tampered"))
 	if response.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("checksum mismatch returned %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestBrowserPreflightRequiresConfiguredOrigin(t *testing.T) {
+	node := setupNode(t)
+	allowed := httptest.NewRequest(http.MethodOptions, "/objects/file/shard/object", nil)
+	allowed.Header.Set("Origin", "https://app.example")
+	allowedResponse := httptest.NewRecorder()
+	node.server.Handler().ServeHTTP(allowedResponse, allowed)
+	if allowedResponse.Code != http.StatusNoContent || allowedResponse.Header().Get("Access-Control-Allow-Origin") != "https://app.example" {
+		t.Fatalf("allowed preflight returned %d with headers %#v", allowedResponse.Code, allowedResponse.Header())
+	}
+
+	denied := httptest.NewRequest(http.MethodOptions, "/objects/file/shard/object", nil)
+	denied.Header.Set("Origin", "https://attacker.example")
+	deniedResponse := httptest.NewRecorder()
+	node.server.Handler().ServeHTTP(deniedResponse, denied)
+	if deniedResponse.Code != http.StatusForbidden || deniedResponse.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("disallowed preflight returned %d with headers %#v", deniedResponse.Code, deniedResponse.Header())
 	}
 }

@@ -66,7 +66,7 @@ func main() {
 	}
 	defer objectStore.Close()
 	verifier := authorization.Verifier{PublicKey: controlPlanePublicKey, NodeID: nodeIdentity.NodeID, Issuer: "horcrux-control-plane"}
-	daemon := server.New(configuration.ListenAddress, configuration.MaxConcurrent, nodeIdentity.NodeID, objectStore, verifier, nodeIdentity, configuration.TLSCertificate, configuration.TLSKey)
+	daemon := server.New(configuration.ListenAddress, configuration.MaxConcurrent, nodeIdentity.NodeID, objectStore, verifier, nodeIdentity, configuration.TLSCertificate, configuration.TLSKey, configuration.WebOrigin)
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if configuration.ControlPlaneURL != "" {
