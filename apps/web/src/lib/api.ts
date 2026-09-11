@@ -1,4 +1,5 @@
 import type { FileManifest, FileSummary, StorageNodeContract } from "@horcrux-file-system/shared";
+import type { CapabilityRequest } from "@horcrux-file-system/storage";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8787";
 let accessToken: string | null = null;
@@ -24,3 +25,19 @@ export function completeFile(fileId: string, manifest: FileManifest) { return re
 export function downloadManifest(fileId: string) { return request<FileManifest>(`/files/${fileId}/download-manifest`); }
 export function getFile(fileId: string) { return request<FileSummary & { objects: FileManifest["objects"] }>(`/files/${fileId}`); }
 export function deleteFile(fileId: string) { return request<void>(`/files/${fileId}`, { method: "DELETE" }); }
+
+export async function requestNodeCapability(input: CapabilityRequest) {
+  const { nodeId, ...body } = input;
+  const result = await request<{ capability: string; expiresAt: string }>(`/nodes/${nodeId}/capabilities`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  return result.capability;
+}
+
+export function submitNodeReceipt(input: { nodeId: string; fileId: string; receipt: string }) {
+  return request<{ accepted: true; nodeId: string; objectId: string }>(`/nodes/${input.nodeId}/receipts`, {
+    method: "POST",
+    body: JSON.stringify({ fileId: input.fileId, receipt: input.receipt }),
+  });
+}
