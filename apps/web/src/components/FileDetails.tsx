@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { FileSummary } from "@horcrux-file-system/shared";
-import type { PipelineProgressDetail, PipelineStage } from "@horcrux-file-system/core";
+import { DEFAULT_OPERATION_CONCURRENCY, mapBounded, type PipelineProgressDetail, type PipelineStage } from "@horcrux-file-system/core";
 import { deleteFile, downloadManifest, getFile } from "../lib/api";
 import { filePipeline, mockStorage } from "../lib/pipeline";
 import { formatBytes } from "./FileList";
@@ -45,7 +45,11 @@ export function FileDetails({ fileId, onChanged, onClose }: { fileId: string; on
   async function remove() {
     if (!confirm("Delete this file and its local mock objects?")) return;
     const manifest = await downloadManifest(fileId).catch(() => null);
-    if (manifest) await Promise.allSettled(manifest.objects.map((item) => mockStorage.deleteShard(item.nodeId, item.objectId)));
+    if (manifest) {
+      await mapBounded(manifest.objects, async (item) => {
+        await mockStorage.deleteShard(item.nodeId, item.objectId).catch(() => {});
+      }, { concurrency: DEFAULT_OPERATION_CONCURRENCY });
+    }
     await deleteFile(fileId);
     onClose();
     onChanged();
