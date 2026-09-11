@@ -5,13 +5,22 @@ import type { CompressionProvider } from "./compression";
 import type { EncryptionProvider } from "./aes";
 import type { ErasureCodingProvider } from "./reed-solomon";
 import type { SecretSharingProvider } from "./shamir";
+import { DEFAULT_OPERATION_CONCURRENCY, mapBounded } from "./concurrency";
 
 export type PipelineStage = "preparing" | "compressing" | "encrypting" | "encoding" | "splitting-key" | "distributing" | "verifying" | "complete";
 export interface PipelineConfig { dataShards: number; parityShards: number; keyShares: number; keyThreshold: number }
 export interface UploadInput { fileId: string; name: string; mimeType: string; bytes: Uint8Array }
+type DistributionTask = { kind: "shard" | "key-share"; index: number; bytes: Uint8Array; nodeId: string; shardType?: "data" | "parity" };
 
 export class BrowserFilePipeline {
-  constructor(private readonly compression: CompressionProvider, private readonly encryption: EncryptionProvider, private readonly erasure: ErasureCodingProvider, private readonly secrets: SecretSharingProvider, private readonly storage: ShardTransport) {}
+  constructor(
+    private readonly compression: CompressionProvider,
+    private readonly encryption: EncryptionProvider,
+    private readonly erasure: ErasureCodingProvider,
+    private readonly secrets: SecretSharingProvider,
+    private readonly storage: ShardTransport,
+    private readonly operationConcurrency = DEFAULT_OPERATION_CONCURRENCY,
+  ) {}
 
   async upload(input: UploadInput, config: PipelineConfig, nodeIds: string[], progress: (stage: PipelineStage) => void = () => {}): Promise<FileManifest> {
     progress("preparing");
@@ -23,14 +32,25 @@ export class BrowserFilePipeline {
     progress("encoding"); const encoded = await this.erasure.encode(encrypted.ciphertext, config.dataShards, config.parityShards);
     progress("splitting-key"); const shares = await this.secrets.splitSecret(encrypted.key, config.keyShares, config.keyThreshold); encrypted.key.fill(0);
     progress("distributing");
-    const objects: ObjectPlacement[] = [];
+    const tasks: DistributionTask[] = [
+      ...encoded.shards.map((bytes, index) => ({ kind: "shard" as const, index, bytes, nodeId: nodeIds[index % nodeIds.length]!, shardType: index < config.dataShards ? "data" as const : "parity" as const })),
+      ...shares.map((bytes, index) => ({ kind: "key-share" as const, index, bytes, nodeId: nodeIds[(index + config.dataShards) % nodeIds.length]! })),
+    ];
+    const completed: ObjectPlacement[] = [];
+    let objects: ObjectPlacement[];
     try {
-      for (const [index, bytes] of encoded.shards.entries()) objects.push(await this.storeObject(input.fileId, "shard", index, bytes, nodeIds[index % nodeIds.length]!, index < config.dataShards ? "data" : "parity"));
-      for (const [index, bytes] of shares.entries()) { objects.push(await this.storeObject(input.fileId, "key-share", index, bytes, nodeIds[(index + config.dataShards) % nodeIds.length]!)); bytes.fill(0); }
+      objects = await mapBounded(tasks, async (task) => {
+        const stored = await this.storeObject(input.fileId, task.kind, task.index, task.bytes, task.nodeId, task.shardType);
+        completed.push(stored);
+        return stored;
+      }, { concurrency: this.operationConcurrency });
     } catch (error) {
-      await Promise.allSettled(objects.map((object) => this.storage.deleteShard(object.nodeId, object.objectId)));
-      shares.forEach((share) => share.fill(0));
+      await mapBounded(completed, async (object) => {
+        await this.storage.deleteShard(object.nodeId, object.objectId).catch(() => {});
+      }, { concurrency: this.operationConcurrency });
       throw error;
+    } finally {
+      shares.forEach((share) => share.fill(0));
     }
     progress("complete");
     return { fileId: input.fileId, originalName: input.name, mimeType: input.mimeType || "application/octet-stream", originalSize: input.bytes.byteLength, compressedSize: compressed.byteLength, encryptedSize: encrypted.ciphertext.byteLength, plaintextHash, ciphertextHash, encryptionAlgorithm: "AES-256-GCM", compressionAlgorithm: "zstd", encryptionIv: bytesToBase64Url(encrypted.iv), dataShards: config.dataShards, parityShards: config.parityShards, shardSize: encoded.shardSize, keyShareThreshold: config.keyThreshold, keyShareCount: config.keyShares, objects };

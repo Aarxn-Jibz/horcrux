@@ -1,11 +1,39 @@
 import { describe, expect, test } from "bun:test";
 import { MemoryShardTransport } from "@horcrux-file-system/storage";
+import { DEFAULT_PIPELINE } from "@horcrux-file-system/shared";
 import { BrowserFilePipeline, AuditedShamirProvider, WasmReedSolomonProvider, WebCryptoAesGcm, ZstdCompressionProvider, sha256 } from "./index";
 
 const nodes = ["a", "b", "c", "d", "e"];
 function setup() { const storage = new MemoryShardTransport(nodes); return { storage, pipeline: new BrowserFilePipeline(new ZstdCompressionProvider(), new WebCryptoAesGcm(), new WasmReedSolomonProvider(), new AuditedShamirProvider(), storage) }; }
 
+class ObservedStorage extends MemoryShardTransport {
+  activePuts = 0;
+  maximumPuts = 0;
+
+  override async putShard(nodeId: string, objectId: string, bytes: Uint8Array) {
+    this.activePuts += 1;
+    this.maximumPuts = Math.max(this.maximumPuts, this.activePuts);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 4));
+      return await super.putShard(nodeId, objectId, bytes);
+    } finally {
+      this.activePuts -= 1;
+    }
+  }
+}
+
 describe("complete browser pipeline", () => {
+  test("stores every shard and key share with exactly four active writes", async () => {
+    const storage = new ObservedStorage(nodes);
+    const pipeline = new BrowserFilePipeline(new ZstdCompressionProvider(), new WebCryptoAesGcm(), new WasmReedSolomonProvider(), new AuditedShamirProvider(), storage);
+    const manifest = await pipeline.upload({ fileId: crypto.randomUUID(), name: "parallel.bin", mimeType: "application/octet-stream", bytes: crypto.getRandomValues(new Uint8Array(4096)) }, DEFAULT_PIPELINE, nodes);
+
+    expect(manifest.objects).toHaveLength(10);
+    expect(storage.objectCount).toBe(10);
+    expect(storage.maximumPuts).toBeLessThanOrEqual(4);
+    expect(storage.maximumPuts).toBe(4);
+  });
+
   test("restores byte-identical content with two nodes unavailable", async () => {
     const { storage, pipeline } = setup(); const bytes = crypto.getRandomValues(new Uint8Array(8192));
     const manifest = await pipeline.upload({ fileId: crypto.randomUUID(), name: "random.bin", mimeType: "application/octet-stream", bytes }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes);
