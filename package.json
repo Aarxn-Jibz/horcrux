@@ -15,6 +15,7 @@
     "test:js": "bun test",
     "test:node": "cd apps/node && go test ./...",
     "test:e2e": "bun run scripts/e2e-local.ts",
+    "keys:generate": "bun run scripts/generate-capability-keys.ts",
     "db:migrate:local": "bun --cwd apps/api db:migrate:local"
   },
   "devDependencies": {
