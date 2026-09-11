@@ -1,4 +1,3 @@
-import { concatBytes } from "./bytes";
 interface ReedSolomonCodec { encode(shards: Uint8Array, dataShards: number, parityShards: number): number; reconstruct(shards: Uint8Array, dataShards: number, parityShards: number, shardsAvailable: boolean[]): number }
 type WasmExports = WebAssembly.Exports & { memory: WebAssembly.Memory; __wbindgen_malloc(size: number): number; __wbindgen_free(pointer: number, size: number): void; encode(pointer: number, length: number, dataShards: number, parityShards: number): number; reconstruct(pointer: number, length: number, dataShards: number, parityShards: number, flagsPointer: number, flagsLength: number): number };
 export async function reedSolomonFromResponse(source: Response | Promise<Response>): Promise<ReedSolomonCodec> {
@@ -14,8 +13,32 @@ export class WasmReedSolomonProvider implements ErasureCodingProvider {
   private instance?: Promise<ReedSolomonCodec>;
   constructor(private readonly create: () => Promise<ReedSolomonCodec> = async () => { const { ReedSolomonErasure } = await import("@subspace/reed-solomon-erasure.wasm"); return ReedSolomonErasure.fromCurrentDirectory(); }) {}
   private ready() { return this.instance ??= this.create(); }
-  async encode(data: Uint8Array, dataShards: number, parityShards: number): Promise<EncodedShards> { this.validate(dataShards, parityShards); const shardSize = Math.max(1, Math.ceil(data.byteLength / dataShards)); const contiguous = new Uint8Array(shardSize * (dataShards + parityShards)); contiguous.set(data); const result = (await this.ready()).encode(contiguous, dataShards, parityShards); if (result !== 0) throw new Error(`Reed-Solomon encoding failed (${result})`); return { shards: this.splitBuffer(contiguous, shardSize), shardSize, originalLength: data.byteLength }; }
-  async decode(shards: Array<Uint8Array | null>, dataShards: number, parityShards: number, originalLength: number) { this.validate(dataShards, parityShards); if (shards.length !== dataShards + parityShards) throw new Error("Incorrect shard count"); const available = shards.filter((shard): shard is Uint8Array => shard !== null); if (available.length < dataShards) throw new Error(`Insufficient Reed-Solomon shards: need ${dataShards}, received ${available.length}`); const shardSize = available[0]!.byteLength; if (available.some((shard) => shard.byteLength !== shardSize)) throw new Error("Reed-Solomon shard sizes do not match"); const contiguous = new Uint8Array(shardSize * shards.length); shards.forEach((shard, index) => { if (shard) contiguous.set(shard, index * shardSize); }); const result = (await this.ready()).reconstruct(contiguous, dataShards, parityShards, shards.map(Boolean)); if (result !== 0) throw new Error(`Reed-Solomon reconstruction failed (${result})`); return concatBytes(this.splitBuffer(contiguous, shardSize).slice(0, dataShards), originalLength); }
-  private splitBuffer(bytes: Uint8Array, size: number) { return Array.from({ length: bytes.byteLength / size }, (_, index) => bytes.slice(index * size, (index + 1) * size)); }
+  async encode(data: Uint8Array, dataShards: number, parityShards: number): Promise<EncodedShards> {
+    this.validate(dataShards, parityShards);
+    const shardSize = Math.max(1, Math.ceil(data.byteLength / dataShards));
+    const contiguous = new Uint8Array(shardSize * (dataShards + parityShards));
+    contiguous.set(data);
+    const result = (await this.ready()).encode(contiguous, dataShards, parityShards);
+    if (result !== 0) throw new Error(`Reed-Solomon encoding failed (${result})`);
+    return { shards: this.splitViews(contiguous, shardSize), shardSize, originalLength: data.byteLength };
+  }
+
+  async decode(shards: Array<Uint8Array | null>, dataShards: number, parityShards: number, originalLength: number) {
+    this.validate(dataShards, parityShards);
+    if (shards.length !== dataShards + parityShards) throw new Error("Incorrect shard count");
+    const available = shards.filter((shard): shard is Uint8Array => shard !== null);
+    if (available.length < dataShards) throw new Error(`Insufficient Reed-Solomon shards: need ${dataShards}, received ${available.length}`);
+    const shardSize = available[0]!.byteLength;
+    if (available.some((shard) => shard.byteLength !== shardSize)) throw new Error("Reed-Solomon shard sizes do not match");
+    const contiguous = new Uint8Array(shardSize * shards.length);
+    shards.forEach((shard, index) => { if (shard) contiguous.set(shard, index * shardSize); });
+    const result = (await this.ready()).reconstruct(contiguous, dataShards, parityShards, shards.map(Boolean));
+    if (result !== 0) throw new Error(`Reed-Solomon reconstruction failed (${result})`);
+    return contiguous.slice(0, originalLength);
+  }
+
+  private splitViews(bytes: Uint8Array, size: number) {
+    return Array.from({ length: bytes.byteLength / size }, (_, index) => bytes.subarray(index * size, (index + 1) * size));
+  }
   private validate(data: number, parity: number) { if (!Number.isInteger(data) || !Number.isInteger(parity) || data < 1 || parity < 1 || data + parity > 256) throw new Error("Invalid Reed-Solomon parameters"); }
 }

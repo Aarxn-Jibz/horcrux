@@ -24,9 +24,10 @@ export function UploadPanel({ onComplete }: { onComplete(): void }) {
       setStage("preparing");
       const bytes = new Uint8Array(await file.arrayBuffer());
       const plaintextHash = await sha256(bytes);
+      setFile(undefined);
       const initialized = await initializeFile({ fileId, originalName: file.name, mimeType: file.type || "application/octet-stream", originalSize: file.size, plaintextHash, dataShards: DEFAULT_PIPELINE.dataShards, parityShards: DEFAULT_PIPELINE.parityShards, keyShareThreshold: DEFAULT_PIPELINE.keyThreshold, keyShareCount: DEFAULT_PIPELINE.keyShares });
       await updateUploadState(fileId, "distributing");
-      const manifest = await filePipeline.upload({ fileId, name: file.name, mimeType: file.type, bytes }, DEFAULT_PIPELINE, initialized.nodes.map((node) => node.id), setStage);
+      const manifest = await filePipeline.upload({ fileId, name: file.name, mimeType: file.type, bytes, plaintextHash }, DEFAULT_PIPELINE, initialized.nodes.map((node) => node.id), setStage);
       setStage("saving");
       await completeFile(fileId, manifest);
       setStage("complete");
