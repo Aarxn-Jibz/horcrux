@@ -80,7 +80,7 @@ bun run dev:web
 
 Open `http://localhost:5173`. The web app defaults to `http://localhost:8787`; set `VITE_API_URL` when the Worker uses another origin.
 
-Create an account with a password of at least 12 characters. Upload a file, select it, and reconstruct it. To demonstrate redundancy, switch mock nodes A and B offline after uploading and download again: the default 3+2 Reed–Solomon and 3-of-5 Shamir settings still succeed. Taking three appropriate nodes offline produces a clear threshold error.
+Create an account with a password of at least 8 characters. Upload a file, select it, and reconstruct it. To demonstrate redundancy, switch mock nodes A and B offline after uploading and download again: the default 3+2 Reed–Solomon and 3-of-5 Shamir settings still succeed. Taking three appropriate nodes offline produces a clear threshold error.
 
 Run verification:
 

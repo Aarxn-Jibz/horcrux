@@ -2,10 +2,16 @@ import { describe, expect, test } from "bun:test";
 import app from "./index";
 import { hashPassword, verifyPassword } from "./lib/password";
 import { issueAccessToken } from "./lib/tokens";
+import { credentialsSchema } from "@horcrux-file-system/shared";
 
 const env = { JWT_SECRET: "test-secret-that-is-long-and-random", WEB_ORIGIN: "http://localhost:5173", DB: {} as D1Database };
 
 describe("authentication", () => {
+  test("accepts eight-character passwords and rejects shorter ones", () => {
+    expect(credentialsSchema.safeParse({ email: "user@example.com", password: "12345678" }).success).toBeTrue();
+    expect(credentialsSchema.safeParse({ email: "user@example.com", password: "1234567" }).success).toBeFalse();
+  });
+
   test("hashes passwords with salt", async () => {
     const first = await hashPassword("a sufficiently long password"); const second = await hashPassword("a sufficiently long password");
     expect(first).not.toBe(second); expect(await verifyPassword("a sufficiently long password", first)).toBeTrue(); expect(await verifyPassword("wrong password", first)).toBeFalse();
