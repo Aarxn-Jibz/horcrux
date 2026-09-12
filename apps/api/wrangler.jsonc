@@ -1,9 +1,8 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "horcrux-file-system-api",
+  "name": "horcruxfs-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
-  "d1_databases": [{ "binding": "DB", "database_name": "horcrux-file-system", "database_id": "replace-with-production-d1-id", "migrations_dir": "migrations" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "horcrux-file-system", "database_id": "038c1731-262b-4e57-8a7b-b427fb88dee0", "migrations_dir": "migrations" }],
   "vars": { "WEB_ORIGIN": "http://localhost:5173" }
 }
-
