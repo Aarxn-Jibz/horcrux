@@ -54,8 +54,8 @@ code, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
 .muted { color: var(--text-secondary); line-height: 1.5; }
 .eyebrow { margin-bottom: var(--space-2); color: var(--text-muted); font-size: .6875rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
 
-.brand-mark { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid var(--border-strong); border-radius: var(--radius-md); color: var(--accent); font: 500 .65rem "IBM Plex Mono", monospace; letter-spacing: -.04em; }
-.brand-mark.small { width: 28px; height: 28px; border-radius: var(--radius-sm); font-size: .58rem; }
+.brand-mark { display: block; width: 42px; height: 42px; object-fit: contain; }
+.brand-mark.small { width: 30px; height: 30px; }
 
 .primary, .danger, .secondary, .text-button { min-height: var(--control-height); border-radius: var(--radius-sm); padding: 0 var(--space-4); font-size: .8125rem; font-weight: 600; transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast); }
 .primary { border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); }

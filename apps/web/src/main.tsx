@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import type { FileSummary } from "@horcrux-file-system/shared";
 import "./styles.css";
 import { AuthScreen } from "./components/AuthScreen";
+import { BrandMark } from "./components/BrandMark";
 import { FileDetails } from "./components/FileDetails";
 import { FileList } from "./components/FileList";
 import { MockNetwork } from "./components/MockNetwork";
@@ -38,7 +39,7 @@ function App() {
   }, [user, reload]);
 
   if (user === undefined) {
-    return <main className="loading"><div className="brand-mark">HFS</div><p>Opening Horcrux…</p></main>;
+    return <main className="loading"><BrandMark /><p>Opening Horcrux…</p></main>;
   }
   if (!user) return <AuthScreen onAuthenticated={setUser} />;
 
@@ -46,7 +47,7 @@ function App() {
     <div className="app-shell">
       <header className="app-header">
         <div className="wordmark">
-          <span className="brand-mark small">HFS</span>
+          <BrandMark small />
           <strong>Horcrux</strong>
         </div>
         <nav className="primary-nav" aria-label="Primary navigation">

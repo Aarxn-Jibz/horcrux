@@ -1,6 +1,7 @@
 import { useId, useState, type FormEvent } from "react";
 import type { User } from "../lib/api";
 import { login, register } from "../lib/api";
+import { BrandMark } from "./BrandMark";
 
 type AuthMode = "login" | "register";
 
@@ -45,7 +46,7 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated(user: User): v
     <main className="auth-shell">
       <section className="auth-card" aria-labelledby="auth-title">
         <div className="auth-brand" aria-label="Horcrux File System">
-          <div className="brand-mark">HFS</div>
+          <BrandMark />
           <span>Horcrux</span>
         </div>
         <div className="horcrux-motif" aria-hidden="true">
