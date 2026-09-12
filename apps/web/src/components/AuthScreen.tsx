@@ -49,9 +49,6 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated(user: User): v
           <BrandMark />
           <span>Horcrux</span>
         </div>
-        <div className="horcrux-motif" aria-hidden="true">
-          {Array.from({ length: 5 }, (_, index) => <span key={index} />)}
-        </div>
         <div className="auth-heading">
           <h1 id="auth-title">{isLogin ? "Sign in" : "Create an account"}</h1>
           <p>{isLogin ? "Continue to your encrypted file system." : "Set up your encrypted file system."}</p>
