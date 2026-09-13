@@ -32,7 +32,12 @@ export class WasmReedSolomonProvider implements ErasureCodingProvider {
     if (available.some((shard) => shard.byteLength !== shardSize)) throw new Error("Reed-Solomon shard sizes do not match");
     const contiguous = new Uint8Array(shardSize * shards.length);
     shards.forEach((shard, index) => { if (shard) contiguous.set(shard, index * shardSize); });
-    const result = (await this.ready()).reconstruct(contiguous, dataShards, parityShards, shards.map(Boolean));
+    // The WASM wrapper's reconstruct scratch buffer is not reusable after a sparse
+    // reconstruction in every runtime. Resetting only after a recovery operation
+    // keeps stripe processing correct without retaining file-sized state.
+    const codec = await this.ready();
+    const result = codec.reconstruct(contiguous, dataShards, parityShards, shards.map(Boolean));
+    if (shards.some((shard) => shard === null)) this.instance = undefined;
     if (result !== 0) throw new Error(`Reed-Solomon reconstruction failed (${result})`);
     return contiguous.slice(0, originalLength);
   }

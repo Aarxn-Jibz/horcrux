@@ -1,4 +1,5 @@
-import type { ShardTransport, StoredObjectRef } from "./index";
+import type { ByteStream, ShardTransport, StoredObjectRef } from "./index";
+import { concat } from "./stream";
 
 export class MemoryShardTransport implements ShardTransport {
   private readonly objects = new Map<string, Uint8Array>();
@@ -9,6 +10,8 @@ export class MemoryShardTransport implements ShardTransport {
   async getShard(nodeId: string, objectId: string, signal?: AbortSignal) { signal?.throwIfAborted(); this.assertOnline(nodeId); const bytes = this.objects.get(`${nodeId}:${objectId}`); if (!bytes) throw new Error(`Shard not found on ${nodeId}`); return bytes.slice(); }
   async deleteShard(nodeId: string, objectId: string) { this.objects.delete(`${nodeId}:${objectId}`); }
   async healthCheck(nodeId: string) { return this.nodeIds.includes(nodeId) && !this.unavailable.has(nodeId); }
+  async putShardStream(nodeId: string, objectId: string, bytes: ByteStream, options: { checksum?: string; size: number }): Promise<StoredObjectRef> { const body = await concat(bytes, options.size); return this.putShard(nodeId, objectId, body); }
+  async getShardStream(nodeId: string, objectId: string, signal?: AbortSignal) { return (async function* (transport: MemoryShardTransport) { yield await transport.getShard(nodeId, objectId, signal); })(this); }
   deleteObject(nodeId: string, objectId: string) { this.objects.delete(`${nodeId}:${objectId}`); }
   get objectCount() { return this.objects.size; }
   corruptObject(nodeId: string, objectId: string) { const bytes = this.objects.get(`${nodeId}:${objectId}`); if (bytes?.length) bytes[0] = bytes[0]! ^ 0xff; }

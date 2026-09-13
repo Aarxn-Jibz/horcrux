@@ -1,5 +1,7 @@
 export * from "./aes";
 export * from "./bytes";
+export * from "./sha256-stream";
+export * from "./chunked";
 export * from "./compression";
 export * from "./concurrency";
 export * from "./pipeline";

@@ -1,4 +1,4 @@
-import type { PutShardOptions, ShardTransport, StoredObjectRef } from "./index";
+import type { ByteStream, PutShardOptions, ShardTransport, StoredObjectRef } from "./index";
 
 export type CapabilityOperation = "PUT" | "GET" | "DELETE";
 export interface CapabilityRequest {
@@ -94,6 +94,32 @@ export class HttpShardTransport implements ShardTransport {
     return new Uint8Array(await response.arrayBuffer());
   }
 
+  async putShardStream(nodeId: string, objectId: string, bytes: ByteStream, options: PutShardOptions & { size: number }): Promise<StoredObjectRef> {
+    if (!options.checksum) throw new Error("HTTP shard uploads require the precomputed object checksum");
+    const fileId = getFileId(objectId);
+    const capability = await this.options.requestCapability({ nodeId, fileId, objectId, operation: "PUT", checksum: options.checksum, size: options.size });
+    const streamInit = {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${capability}`, "Content-Type": "application/octet-stream" },
+      body: asyncIterableToReadableStream(bytes),
+      signal: options.signal,
+      // Required by Chromium for a streaming request body; ignored by browsers which do not need it.
+      duplex: "half" as never,
+    } as RequestInit & { duplex: "half" };
+    const response = await this.nodeRequest(nodeId, objectId, streamInit);
+    const stored = await response.json() as PutResponse;
+    if (stored.nodeId !== nodeId || stored.objectId !== objectId || stored.checksum !== options.checksum || stored.size !== options.size || !stored.receipt) throw new Error("Storage node returned an inconsistent receipt response");
+    await this.options.submitReceipt({ nodeId, fileId, receipt: stored.receipt });
+    return { nodeId, objectId, size: stored.size, checksum: stored.checksum };
+  }
+
+  async getShardStream(nodeId: string, objectId: string, signal?: AbortSignal): Promise<ByteStream> {
+    const capability = await this.options.requestCapability({ nodeId, fileId: getFileId(objectId), objectId, operation: "GET" });
+    const response = await this.nodeRequest(nodeId, objectId, { method: "GET", headers: { Authorization: `Bearer ${capability}` }, signal });
+    if (!response.body) throw new Error("Storage node returned an empty response body");
+    return readableStreamToAsyncIterable(response.body);
+  }
+
   async deleteShard(nodeId: string, objectId: string) {
     const capability = await this.options.requestCapability({
       nodeId,
@@ -134,6 +160,22 @@ export class HttpShardTransport implements ShardTransport {
     }
     return url.href.replace(/\/$/, "");
   }
+}
+
+function asyncIterableToReadableStream(source: ByteStream) {
+  const iterator = source[Symbol.asyncIterator]();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const next = await iterator.next();
+      if (next.done) controller.close(); else controller.enqueue(next.value);
+    },
+    async cancel() { await iterator.return?.(); },
+  });
+}
+
+async function* readableStreamToAsyncIterable(stream: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array> {
+  const reader = stream.getReader();
+  try { while (true) { const next = await reader.read(); if (next.done) return; yield next.value; } } finally { reader.releaseLock(); }
 }
 
 function getFileId(objectId: string) {
