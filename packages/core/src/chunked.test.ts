@@ -33,6 +33,14 @@ describe("v2 chunked file format", () => {
     storage.setNodeAvailable("a", false); storage.setNodeAvailable("b", false); storage.setNodeAvailable("c", false);
     await expect(instance.downloadTo(manifest, () => {})).rejects.toThrow("Insufficient Shamir shares");
   }, 120_000);
+
+  test("processes a 32 MiB generated source as 32 bounded frames", async () => {
+    const storage = new MemoryShardTransport(nodes); const input = generated(32 * CHUNKED_PLAINTEXT_BYTES); const instance = pipeline(storage);
+    const manifest = await instance.upload({ fileId: crypto.randomUUID(), name: "large.bin", mimeType: "application/octet-stream", size: input.byteLength, source: source(input, 131_071) }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes);
+    expect(manifest.chunkCount).toBe(32);
+    const output: Uint8Array[] = []; await instance.downloadTo(manifest, (chunk) => { output.push(chunk.slice()); });
+    expect(new Sha256Stream().update(join(output)).hex()).toBe(new Sha256Stream().update(input).hex());
+  }, 180_000);
 });
 
 function generated(size: number) { const bytes = new Uint8Array(size); for (let index = 0; index < size; index += 1) bytes[index] = (index * 17 + index >>> 8) & 0xff; return bytes; }
