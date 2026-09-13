@@ -17,6 +17,7 @@ import (
 	"github.com/horcrux-file-system/horcrux/apps/node/internal/identity"
 	"github.com/horcrux-file-system/horcrux/apps/node/internal/server"
 	"github.com/horcrux-file-system/horcrux/apps/node/internal/storage"
+	webrtcnode "github.com/horcrux-file-system/horcrux/apps/node/internal/webrtc"
 )
 
 func main() {
@@ -72,6 +73,8 @@ func main() {
 	if configuration.ControlPlaneURL != "" {
 		reporter := &heartbeat.Reporter{ControlPlaneURL: configuration.ControlPlaneURL, NodeID: nodeIdentity.NodeID, NodeVersion: server.Version, Endpoint: configuration.AdvertiseURL, Interval: configuration.HeartbeatInterval, Stats: objectStore, Signer: nodeIdentity, OnError: func(err error) { slog.Warn("heartbeat failed", "error", err) }}
 		go reporter.Run(shutdownContext)
+		webrtcService := &webrtcnode.Service{Manager: webrtcnode.NewManager(nil), Signals: &webrtcnode.SignalingClient{ControlPlaneURL: configuration.ControlPlaneURL, NodeID: nodeIdentity.NodeID, Signer: nodeIdentity}, NodeID: nodeIdentity.NodeID, Store: objectStore, Verifier: verifier, Signer: nodeIdentity}
+		go webrtcService.Run(shutdownContext)
 	}
 	go func() {
 		<-shutdownContext.Done()

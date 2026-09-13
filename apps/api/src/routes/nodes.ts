@@ -162,4 +162,15 @@ router.post("/:id/webrtc/signals", async (c) => {
   return c.json({ signals: signals.results });
 });
 
+router.post("/:id/webrtc/sessions", async (c) => {
+  const body = z.object({ auth: z.string().min(80) }).safeParse(await c.req.json().catch(() => null));
+  if (!body.success) throw new ApiError(422, "validation_error", "Node signaling authentication is required");
+  const node = await c.env.DB.prepare("SELECT id,public_key FROM devices WHERE id=? AND public_key IS NOT NULL").bind(c.req.param("id")).first<NodeRow>();
+  if (!node) throw new ApiError(404, "node_not_found", "Storage node not found");
+  const auth = await verifyEnvelope(body.data.auth, node.public_key, webRtcNodeAuthSchema).catch(() => { throw new ApiError(401, "node_signal_invalid", "Node signaling signature is invalid"); });
+  const now = Math.floor(Date.now() / 1_000); if (auth.nodeId !== node.id || auth.timestamp < now - 120 || auth.timestamp > now + 60) throw new ApiError(403, "node_signal_invalid", "Node signaling scope is invalid");
+  const sessions = await c.env.DB.prepare("SELECT id FROM webrtc_sessions WHERE device_id=? AND expires_at>datetime('now') ORDER BY created_at").bind(node.id).all<{ id: string }>();
+  return c.json({ sessions: sessions.results.map((row) => row.id) });
+});
+
 export default router;

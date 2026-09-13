@@ -29,11 +29,10 @@ type SignalingClient struct {
 }
 
 func (client *SignalingClient) Exchange(ctx context.Context, sessionID string, signal *Signal) ([]Signal, error) {
-	payload, err := json.Marshal(NodeAuth{Version: "1", NodeID: client.NodeID, Timestamp: time.Now().Unix()})
+	auth, err := client.auth()
 	if err != nil {
 		return nil, err
 	}
-	auth := base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(client.Signer.Sign(payload))
 	body, err := json.Marshal(struct {
 		Auth      string  `json:"auth"`
 		SessionID string  `json:"sessionId"`
@@ -66,4 +65,41 @@ func (client *SignalingClient) Exchange(ctx context.Context, sessionID string, s
 		return nil, err
 	}
 	return decoded.Signals, nil
+}
+
+func (client *SignalingClient) Sessions(ctx context.Context) ([]string, error) {
+	auth, err := client.auth()
+	if err != nil {
+		return nil, err
+	}
+	body, _ := json.Marshal(map[string]string{"auth": auth})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(client.ControlPlaneURL, "/")+"/nodes/"+client.NodeID+"/webrtc/sessions", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	httpClient := client.Client
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 10 * time.Second}
+	}
+	response, err := httpClient.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode/100 != 2 {
+		return nil, fmt.Errorf("session discovery rejected: %d", response.StatusCode)
+	}
+	var decoded struct {
+		Sessions []string `json:"sessions"`
+	}
+	err = json.NewDecoder(response.Body).Decode(&decoded)
+	return decoded.Sessions, err
+}
+func (client *SignalingClient) auth() (string, error) {
+	payload, err := json.Marshal(NodeAuth{Version: "1", NodeID: client.NodeID, Timestamp: time.Now().Unix()})
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(client.Signer.Sign(payload)), nil
 }
