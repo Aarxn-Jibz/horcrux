@@ -13,6 +13,7 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
   if (!response.ok) { const body = await response.json().catch(() => ({ error: { message: "Request failed" } })) as { error?: { message?: string } }; throw new Error(body.error?.message ?? `Request failed (${response.status})`); }
   return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }
+export function authenticatedRequest<T>(path: string, init: RequestInit = {}) { return request<T>(path, init); }
 async function session(path: "/auth/login" | "/auth/register", email: string, password: string) { const result = await request<{ accessToken: string; user: User }>(path, { method: "POST", body: JSON.stringify({ email, password }) }, false); accessToken = result.accessToken; return result.user; }
 export const login = (email: string, password: string) => session("/auth/login", email, password);
 export const register = (email: string, password: string) => session("/auth/register", email, password);
