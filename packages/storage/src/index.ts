@@ -8,7 +8,8 @@ export interface ShardTransport {
   healthCheck(nodeId: string): Promise<boolean>;
   /** Optional bounded-memory object operations used by the v2 striped format. */
   putShardStream?(nodeId: string, objectId: string, bytes: ByteStream, options: PutShardOptions & { maxSize: number }): Promise<StoredObjectRef>;
-  getShardStream?(nodeId: string, objectId: string, signal?: AbortSignal): Promise<ByteStream>;
+  /** Starts at an object byte offset when recovery needs to replace a failed stream. */
+  getShardStream?(nodeId: string, objectId: string, signal?: AbortSignal, start?: number): Promise<ByteStream>;
 }
 export * from "./indexed-db";
 export * from "./memory";

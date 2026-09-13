@@ -113,9 +113,12 @@ export class HttpShardTransport implements ShardTransport {
     return { nodeId, objectId, size: stored.size, checksum: stored.checksum };
   }
 
-  async getShardStream(nodeId: string, objectId: string, signal?: AbortSignal): Promise<ByteStream> {
+  async getShardStream(nodeId: string, objectId: string, signal?: AbortSignal, start = 0): Promise<ByteStream> {
     const capability = await this.options.requestCapability({ nodeId, fileId: getFileId(objectId), objectId, operation: "GET" });
-    const response = await this.nodeRequest(nodeId, objectId, { method: "GET", headers: { Authorization: `Bearer ${capability}` }, signal });
+    const headers: Record<string, string> = { Authorization: `Bearer ${capability}` };
+    if (start > 0) headers.Range = `bytes=${start}-`;
+    const response = await this.nodeRequest(nodeId, objectId, { method: "GET", headers, signal });
+    if (start > 0 && response.status !== 206) throw new Error("Storage node ignored a shard resume range request");
     if (!response.body) throw new Error("Storage node returned an empty response body");
     // Bun's fetch response body iterator is currently incompatible with chunked HTTP
     // responses from the local Go test daemon. Browsers retain the streaming branch.
