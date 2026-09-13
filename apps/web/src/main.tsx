@@ -8,15 +8,16 @@ import { FileDetails } from "./components/FileDetails";
 import { FileList } from "./components/FileList";
 import { MockNetwork } from "./components/MockNetwork";
 import { UploadPanel } from "./components/UploadPanel";
+import { Landing } from "./components/Landing";
 import { listFiles, logout, refresh, type User } from "./lib/api";
 
-type View = "files" | "devices";
+type View = "landing" | "auth" | "files" | "devices";
 
 function App() {
   const [user, setUser] = useState<User | null>();
   const [files, setFiles] = useState<FileSummary[]>([]);
   const [selected, setSelected] = useState<string>();
-  const [view, setView] = useState<View>("files");
+  const [view, setView] = useState<View>("landing");
   const [error, setError] = useState("");
 
   const reload = useCallback(async () => {
@@ -41,7 +42,8 @@ function App() {
   if (user === undefined) {
     return <main className="loading"><BrandMark /><p>Opening Horcrux…</p></main>;
   }
-  if (!user) return <AuthScreen onAuthenticated={setUser} />;
+  if (view === "landing") return <Landing user={user} onEnter={() => setView("files")} onAuth={() => setView("auth")} />;
+  if (!user) return <AuthScreen onAuthenticated={(next) => { setUser(next); setView("files"); }} />;
 
   return (
     <div className="app-shell">
