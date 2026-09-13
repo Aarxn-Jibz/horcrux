@@ -7,6 +7,7 @@ import { formatBytes } from "./FileList";
 import { ProgressSteps, TimingSummary } from "./ProgressSteps";
 import { OperationError } from "./OperationError";
 import { describeError, type DisplayError } from "../lib/errors";
+import { openDownloadSink } from "../lib/file-sink";
 
 type DetailedFile = FileSummary & { objects: FileManifest["objects"] };
 
@@ -30,15 +31,14 @@ export function FileDetails({ fileId, onChanged, onClose }: { fileId: string; on
       const manifest = await downloadManifest(fileId);
       const endpoints = new Map(manifest.objects.flatMap((object) => object.endpoint ? [[object.nodeId, object.endpoint] as const] : []));
       const mode = endpoints.size > 0 ? "http" : "mock";
-      const bytes = (manifest as FileManifest & { formatVersion?: number }).formatVersion === 2
-        ? await downloadChunked(manifest as unknown as ChunkedManifest, endpoints)
-        : await createFilePipeline(mode, endpoints).download(manifest, (nextStage, detail) => { setStage(nextStage); setTiming(detail); });
-      const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: manifest.mimeType }));
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = manifest.originalName;
-      anchor.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      if ((manifest as FileManifest & { formatVersion?: number }).formatVersion === 2) {
+        const sink = await openDownloadSink(manifest.originalName, manifest.mimeType, manifest.originalSize);
+        await createChunkedFilePipeline(endpoints).downloadTo(manifest as unknown as ChunkedManifest, sink);
+      } else {
+        const bytes = await createFilePipeline(mode, endpoints).download(manifest, (nextStage, detail) => { setStage(nextStage); setTiming(detail); });
+        const sink = await openDownloadSink(manifest.originalName, manifest.mimeType, bytes.byteLength);
+        await sink.write(bytes); await sink.close();
+      }
     } catch (cause) {
       setError(describeError(cause, "Reconstruction failed"));
     } finally {
@@ -85,12 +85,4 @@ export function FileDetails({ fileId, onChanged, onClose }: { fileId: string; on
       {!file && error && <OperationError error={error} />}
     </aside>
   );
-}
-
-async function downloadChunked(manifest: ChunkedManifest, endpoints: Map<string, string>) {
-  const chunks: Uint8Array[] = [];
-  await createChunkedFilePipeline(endpoints).downloadTo(manifest, (chunk) => { chunks.push(chunk.slice()); });
-  const size = chunks.reduce((total, chunk) => total + chunk.byteLength, 0); const bytes = new Uint8Array(size); let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  return bytes;
 }
