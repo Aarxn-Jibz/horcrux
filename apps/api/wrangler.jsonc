@@ -4,5 +4,5 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
   "d1_databases": [{ "binding": "DB", "database_name": "horcrux-file-system", "database_id": "038c1731-262b-4e57-8a7b-b427fb88dee0", "migrations_dir": "migrations" }],
-  "vars": { "WEB_ORIGIN": "http://localhost:5173" }
+  "vars": { "WEB_ORIGIN": "https://horcruxfs.pages.dev" }
 }
