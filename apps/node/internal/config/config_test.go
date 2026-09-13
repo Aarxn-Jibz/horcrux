@@ -43,3 +43,16 @@ func TestRejectsInvalidBrowserOrigin(t *testing.T) {
 		t.Fatal("browser origin with a path was accepted")
 	}
 }
+
+func TestRequiresSecureAdvertisedEndpointForHeartbeats(t *testing.T) {
+	key := []string{"--control-plane-public-key", "test-key", "--control-plane-url", "https://control.example"}
+	if _, err := Parse(key); err == nil {
+		t.Fatal("heartbeat configuration without advertised endpoint was accepted")
+	}
+	if _, err := Parse(append(key, "--advertise-url", "http://192.168.1.42:9443")); err == nil {
+		t.Fatal("insecure LAN advertised endpoint was accepted")
+	}
+	if _, err := Parse(append(key, "--advertise-url", "https://192.168.1.42:9443")); err != nil {
+		t.Fatalf("secure advertised endpoint was rejected: %v", err)
+	}
+}
