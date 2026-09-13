@@ -16,7 +16,7 @@ Enrollment uses an authenticated user-created, random, ten-minute challenge. D1 
 
 ## Capabilities
 
-Hono signs compact Ed25519 capabilities. Nodes need only the control-plane public key. A grant binds protocol version, issuer, node ID, object ID, operation, issued/expiry times, and random `jti`; PUT also binds SHA-256 checksum and exact size. The default lifetime is five minutes.
+Hono signs compact Ed25519 capabilities. Nodes need only the control-plane public key. A grant binds protocol version, issuer, node ID, object ID, operation, issued/expiry times, and random `jti`. Legacy exact PUTs bind SHA-256 and size. Streamed v2 PUTs instead bind a positive maximum size and deliberately cannot carry client-declared final metadata. The default lifetime is five minutes.
 
 Capabilities are retryable until expiry. This is deliberate: PUT is idempotent only for identical checksum/size, GET is read-only, and DELETE becomes a not-found result after success. Nodes do not maintain an unbounded global nonce database. Hono records issued grants; a stricter distributed replay cache can be added if a future operation gains non-idempotent effects.
 
@@ -26,7 +26,7 @@ The browser never receives a node master password. A PUT grant for object X cann
 
 After durable PUT semantics complete, the node signs a receipt containing version, node ID, object ID, checksum, size, timestamp, and the capability `jti` as `requestId`. Receipts contain no object or key bytes.
 
-Hono verifies the registered node public key, exact issued PUT scope, expiry, checksum, size, owner/file, and a bounded timestamp window. D1 uniqueness on request ID and node/object prevents receipt replay from confirming unrelated work. Real-node file completion requires matching receipts; browser mocks retain an explicit development-only exception.
+Hono verifies the registered node public key, issued PUT scope, expiry, owner/file, and a bounded timestamp window. Exact legacy receipts must match their issued checksum and size; streamed receipts must be node-attested and no larger than their signed authorization bound. D1 uniqueness on request ID and node/object prevents receipt replay from confirming unrelated work. Real-node file completion requires matching receipts; browser mocks retain an explicit development-only exception.
 
 ## Storage safety
 

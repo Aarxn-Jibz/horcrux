@@ -38,9 +38,9 @@ Existing files are format v1 and retain the whole-file zstd/AES-GCM layout. New 
 
 Each v2 file has one random AES key, Shamir-split once as before. A random 64-bit per-file nonce prefix plus the unsigned 32-bit frame index forms each 96-bit AES-GCM nonce; counter overflow is rejected. AAD binds format version, file UUID, original size, frame index, and frame plaintext length. Frame-local compression trades some compression ratio for bounded memory and independent recovery.
 
-V2 PUT capabilities still bind complete shard object checksum and size. The browser performs a deterministic preflight pass to calculate those values, then uses a second bounded, backpressured pass to generate RS stripes once and fan them out to the five streamed HTTP PUT bodies. Node writes were already streaming: Go hashes and size-checks the request body while writing a temporary file, fsyncs, then commits metadata and signs its receipt.
+V2 streamed PUT capabilities bind a positive maximum object size, not browser-declared final metadata. The browser generates each stripe once and fans it out to five bounded PUT bodies. The node enforces the reservation while streaming to a temporary file, computes actual SHA-256 and byte count, fsyncs and atomically commits it, then signs those actual values in its receipt. Hono verifies that the attested result fits the issued bound before committing placement metadata.
 
-Core v2 reconstruction writes verified plaintext frames to a callback without retaining the file. The current browser download UI still collects those final frames to create a Blob, so download-to-disk is the remaining whole-output-memory limitation; uploads and the core reconstruction pipeline are bounded by a stripe plus transport buffers.
+Core v2 reconstruction writes verified frames to a `FileSink` without retaining the file. The web app uses the native File System Access API where available. Blob fallback is capped at 100 MiB and clearly rejects larger downloads on unsupported browsers.
 
 See [the architecture guide](docs/architecture.md) and [security model](docs/security.md) for trust boundaries, memory behavior, and the direct/STUN/TURN roadmap.
 
@@ -123,11 +123,18 @@ bun run test:node
 bun run build:node
 bun run test:e2e
 bun run test:five-node
+bun run test:large-file
 ```
 
 The integration test starts a real Go daemon on loopback and verifies a TS-issued grant, opaque upload, signed receipt, byte-identical download, authorization rejection, and delete. It needs permission to bind a local port.
 
 `bun run test:five-node` is the local HTTP acceptance test. It starts an ephemeral Wrangler/D1 control plane, applies every migration, enrolls five independently identified Go node processes on dynamically allocated loopback ports, uploads through the browser-compatible core pipeline and `HttpShardTransport`, verifies two opaque objects per node, reconstructs with all nodes, terminates two processes and reconstructs again, then verifies a clear failure after a third process stops. It needs permission to bind local ports and does not persist secrets or node data.
+
+`bun run test:large-file` runs that same real-node v2 path using a deterministic 1 GiB generated source. It hashes generated and restored bytes incrementally, does not allocate a 1 GiB source/output buffer, and is intentionally opt-in.
+
+## Public site
+
+`/` is a public landing page. It remains available to signed-in users, whose navigation exposes **Open Horcrux**. The landing illustration is progressively enhanced with a lazy Three.js 5 → 3 reconstruction sequence; static content remains available for reduced motion and WebGL failure.
 
 ## Cloudflare deployment
 

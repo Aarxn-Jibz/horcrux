@@ -44,12 +44,12 @@ Mock IndexedDB nodes are explicitly exempt from signed receipts during developme
 
 ## Download sequence
 
-1. Request the owned reconstruction manifest and object-scoped GET grants.
+1. Request the owned reconstruction manifest and object-scoped GET grants. V2 readers can resume an authorized shard at an HRS2 record offset and replace a truncated or malformed selected stream with an unused shard.
 2. Interleave shard and share retrieval across four runners.
 3. Validate every returned object SHA-256.
 4. Abort or safely ignore remaining work after any three valid shards and three valid shares arrive.
 5. Reconstruct and verify the ciphertext, reconstruct the key, authenticate/decrypt, decompress, then verify original size and SHA-256.
-6. Create the browser download only after every verification succeeds.
+6. Write verified v2 frames incrementally to a `FileSink`; native browser file output is preferred and Blob fallback is bounded.
 
 ## Node runtime and storage
 
@@ -98,13 +98,12 @@ Local advanced details expose actual stage durations, configured concurrency, an
 
 ## Memory model
 
-Processing is still whole-file and capped at 256 MiB. Large references are cleared after each ownership boundary. Reed–Solomon shards are views over one contiguous allocation until a transport needs ownership; IndexedDB copies only narrow views to avoid retaining the complete backing store. Queues discard tasks, and binary data never enters React state or logs.
+V1 processing remains whole-file and capped at 256 MiB. V2 uses 1 MiB plaintext frames; uploads generate each encrypted RS stripe once and fan it out under backpressure, while downloads emit a verified frame to the output sink before advancing. Large references are cleared after each ownership boundary. Reed–Solomon shards are views over one contiguous allocation until a transport needs ownership; IndexedDB copies only narrow views to avoid retaining the complete backing store.
 
 Peak memory still includes the browser file read, active codec/ciphertext buffers, Reed–Solomon storage, IndexedDB serialization, and WASM linear memory. Compression, hashing, and RS workers were evaluated but intentionally not added: multiple WASM instances and transfers would raise peak memory and lifecycle complexity without fixing the whole-file limit. Web Crypto remains on the browser API. Streaming/chunked formats are the meaningful future OOM improvement.
 
 ## Future work
 
-- chunked/streaming compression, encryption framing, hashing, and erasure coding;
 - production WebRTC signaling and data-channel transport;
 - STUN configuration and a measured TURN fallback deployment;
 - OS keystore integration and an optional tray UI around the headless daemon;
