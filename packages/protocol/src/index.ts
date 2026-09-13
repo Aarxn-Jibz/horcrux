@@ -64,3 +64,13 @@ export const enrollmentProofSchema = z.object({
   name: z.string().min(1).max(128),
   capacityBytes: z.int().nonnegative(),
 });
+
+/** Opaque SDP/ICE relay records; the Worker never interprets peer bytes. */
+export const webRtcSignalSchema = z.object({
+  sessionId: z.uuid(),
+  nodeId: identifier,
+  sender: z.enum(["browser", "node"]),
+  type: z.enum(["offer", "answer", "ice-candidate"]),
+  payload: z.string().min(1).max(128 * 1024),
+});
+export type WebRtcSignal = z.infer<typeof webRtcSignalSchema>;

@@ -7,6 +7,7 @@ import authRoutes from "./routes/auth";
 import fileRoutes from "./routes/files";
 import deviceRoutes from "./routes/devices";
 import nodeRoutes from "./routes/nodes";
+import webRtcRoutes from "./routes/webrtc";
 
 const app = new Hono<{ Bindings: Env; Variables: ApiVariables }>();
 app.use("*", async (c, next) => {
@@ -23,6 +24,7 @@ app.route("/auth", authRoutes);
 app.route("/files", fileRoutes);
 app.route("/devices", deviceRoutes);
 app.route("/nodes", nodeRoutes);
+app.route("/webrtc", webRtcRoutes);
 app.notFound((c) => c.json({ error: { code: "not_found", message: "Route not found" } }, 404));
 app.onError((error, c) => errorResponse(c, error));
 
