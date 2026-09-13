@@ -117,6 +117,9 @@ export class HttpShardTransport implements ShardTransport {
     const capability = await this.options.requestCapability({ nodeId, fileId: getFileId(objectId), objectId, operation: "GET" });
     const response = await this.nodeRequest(nodeId, objectId, { method: "GET", headers: { Authorization: `Bearer ${capability}` }, signal });
     if (!response.body) throw new Error("Storage node returned an empty response body");
+    // Bun's fetch response body iterator is currently incompatible with chunked HTTP
+    // responses from the local Go test daemon. Browsers retain the streaming branch.
+    if ("Bun" in globalThis) return singleChunk(new Uint8Array(await response.arrayBuffer()));
     return readableStreamToAsyncIterable(response.body);
   }
 
@@ -177,6 +180,7 @@ async function* readableStreamToAsyncIterable(stream: ReadableStream<Uint8Array>
   const reader = stream.getReader();
   try { while (true) { const next = await reader.read(); if (next.done) return; yield next.value; } } finally { reader.releaseLock(); }
 }
+async function* singleChunk(bytes: Uint8Array): AsyncGenerator<Uint8Array> { yield bytes; }
 
 function getFileId(objectId: string) {
   const separator = objectId.indexOf("/");
