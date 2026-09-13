@@ -4,6 +4,7 @@ import {
   heartbeatSchema,
   PROTOCOL_VERSION,
   storageReceiptSchema,
+  webRtcNodeAuthSchema,
   verifyEnvelope,
   type StorageCapability,
 } from "@horcrux-file-system/protocol";
@@ -142,6 +143,23 @@ router.post("/:id/receipts", requireAuth, async (c) => {
     throw new ApiError(409, "receipt_already_submitted", "Storage receipt was already submitted");
   }
   return c.json({ accepted: true, nodeId: node.id, objectId: receipt.objectId });
+});
+
+// Nodes authenticate polling/signaling with their existing Ed25519 identity;
+// browsers never receive a node credential.
+router.post("/:id/webrtc/signals", async (c) => {
+  const body = z.object({ auth: z.string().min(80), sessionId: z.uuid(), signal: z.object({ type: z.enum(["answer", "ice-candidate"]), payload: z.string().min(1).max(128 * 1024) }).optional() }).safeParse(await c.req.json().catch(() => null));
+  if (!body.success) throw new ApiError(422, "validation_error", "Invalid node WebRTC signal");
+  const node = await c.env.DB.prepare("SELECT id,public_key FROM devices WHERE id=? AND public_key IS NOT NULL").bind(c.req.param("id")).first<NodeRow>();
+  if (!node) throw new ApiError(404, "node_not_found", "Storage node not found");
+  const auth = await verifyEnvelope(body.data.auth, node.public_key, webRtcNodeAuthSchema).catch(() => { throw new ApiError(401, "node_signal_invalid", "Node signaling signature is invalid"); });
+  const now = Math.floor(Date.now() / 1_000);
+  if (auth.nodeId !== node.id || auth.timestamp < now - 120 || auth.timestamp > now + 60) throw new ApiError(403, "node_signal_invalid", "Node signaling scope is invalid");
+  const session = await c.env.DB.prepare("SELECT id FROM webrtc_sessions WHERE id=? AND device_id=? AND expires_at>datetime('now')").bind(body.data.sessionId, node.id).first();
+  if (!session) throw new ApiError(404, "signal_session_not_found", "WebRTC session is unavailable");
+  if (body.data.signal) await c.env.DB.prepare("INSERT INTO webrtc_signals (id,session_id,sender,signal_type,payload) VALUES (?,?,?,?,?)").bind(crypto.randomUUID(), body.data.sessionId, "node", body.data.signal.type, body.data.signal.payload).run();
+  const signals = await c.env.DB.prepare("SELECT signal_type type,payload FROM webrtc_signals WHERE session_id=? AND sender='browser' ORDER BY created_at,id").bind(body.data.sessionId).all<{ type: "offer" | "ice-candidate"; payload: string }>();
+  return c.json({ signals: signals.results });
 });
 
 export default router;

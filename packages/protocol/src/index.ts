@@ -74,3 +74,5 @@ export const webRtcSignalSchema = z.object({
   payload: z.string().min(1).max(128 * 1024),
 });
 export type WebRtcSignal = z.infer<typeof webRtcSignalSchema>;
+
+export const webRtcNodeAuthSchema = z.object({ version: z.literal(PROTOCOL_VERSION), nodeId: identifier, timestamp: z.int().nonnegative() });
