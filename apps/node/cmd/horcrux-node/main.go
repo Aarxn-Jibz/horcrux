@@ -70,7 +70,7 @@ func main() {
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if configuration.ControlPlaneURL != "" {
-		reporter := &heartbeat.Reporter{ControlPlaneURL: configuration.ControlPlaneURL, NodeID: nodeIdentity.NodeID, NodeVersion: server.Version, Interval: configuration.HeartbeatInterval, Stats: objectStore, Signer: nodeIdentity, OnError: func(err error) { slog.Warn("heartbeat failed", "error", err) }}
+		reporter := &heartbeat.Reporter{ControlPlaneURL: configuration.ControlPlaneURL, NodeID: nodeIdentity.NodeID, NodeVersion: server.Version, Endpoint: configuration.AdvertiseURL, Interval: configuration.HeartbeatInterval, Stats: objectStore, Signer: nodeIdentity, OnError: func(err error) { slog.Warn("heartbeat failed", "error", err) }}
 		go reporter.Run(shutdownContext)
 	}
 	go func() {
@@ -80,7 +80,7 @@ func main() {
 		_ = daemon.Shutdown(request)
 	}()
 
-	slog.Info("horcrux node listening", "node_id", nodeIdentity.NodeID, "address", configuration.ListenAddress, "data", configuration.DataDirectory)
+	slog.Info("horcrux node listening", "node_id", nodeIdentity.NodeID, "address", configuration.ListenAddress, "advertise_url", configuration.AdvertiseURL, "data", configuration.DataDirectory)
 	if err := daemon.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("node stopped unexpectedly", "error", err)
 		os.Exit(1)

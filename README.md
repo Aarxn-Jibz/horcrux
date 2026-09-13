@@ -57,7 +57,7 @@ bun run dev:api
 bun run dev:web
 ```
 
-The browser defaults to `http://localhost:8787` for the Worker. The five development devices are IndexedDB partitions in that browser profile and are clearly labeled as mocks.
+The browser defaults to `http://localhost:8787` for the Worker and IndexedDB mock storage. Set `VITE_HORCRUX_STORAGE_MODE=http` before starting Vite to use enrolled Go nodes instead. HTTP mode deliberately requires five healthy, distinct physical node identities with fresh heartbeats; it never falls back to mock storage.
 
 ## Laptop node
 
@@ -77,10 +77,30 @@ export HORCRUX_ENROLLMENT_TOKEN='<one-time token>'
   --control-plane-url 'http://127.0.0.1:8787' \
   --enrollment-challenge '<challenge UUID>' \
   --node-name 'My laptop' \
+  --listen '0.0.0.0:9443' \
+  --advertise-url 'https://192.168.1.42:9443' \
+  --tls-cert './node-cert.pem' \
+  --tls-key './node-key.pem' \
+  --web-origin 'http://192.168.1.10:5173' \
   --data-dir './node-data'
 ```
 
-Plain HTTP listeners are restricted to loopback. Configure `--tls-cert` and `--tls-key` for any non-loopback listener, plus the exact allowed browser `--web-origin`. The initial HTTP data plane needs an explicit endpoint resolver in the browser; automatic remote discovery and WebRTC are future work. See [the node guide](apps/node/README.md).
+The advertised URL is signed into every heartbeat and persisted by D1. It is the URL the browser receives in placement and reconstruction manifests; `--listen` and `--advertise-url` are intentionally separate. Plain HTTP listeners and advertised URLs are restricted to loopback. Configure `--tls-cert` and `--tls-key` for any LAN node, plus the exact allowed browser `--web-origin`. See the physical test procedure below and [the node guide](apps/node/README.md).
+
+## Physical-node LAN test
+
+Laptop A hosts the API and web app. Generate a development TLS certificate trusted by every browser that will connect to a node (for example, `mkcert 192.168.1.42` on each node; do not commit certificates or keys). Configure `WEB_ORIGIN=http://192.168.1.10:5173` in `apps/api/.dev.vars`, run `bun run db:migrate:local`, then start `bun run dev:api` and `VITE_HORCRUX_STORAGE_MODE=http bun --cwd apps/web dev --host 0.0.0.0`.
+
+Register and sign in through the browser on Laptop A. With its access JWT, create an enrollment challenge:
+
+```bash
+curl -X POST http://192.168.1.10:8787/devices/enrollment-challenges \
+  -H 'Authorization: Bearer <ACCESS_JWT>'
+```
+
+On Laptop B, use the returned `challengeId` and `token` to start the node as in the preceding command, substituting Laptop A's control-plane URL, Laptop A's Vite origin, and Laptop B's LAN address. Check the Devices screen after a heartbeat (normally within 30 seconds): it must show Online and the advertised endpoint. Repeat this on five independently powered laptops (or five separately configured test machines) before uploading in HTTP mode.
+
+Upload and download through the normal Files UI. Node data directories contain only opaque encrypted objects and `metadata.sqlite`; compare the downloaded file with `sha256sum original downloaded`. Five processes on one laptop can exercise placement and recovery mechanics using five ports/data directories, but are not independent failure domains and must not be described as physical fault tolerance.
 
 ## Verification
 

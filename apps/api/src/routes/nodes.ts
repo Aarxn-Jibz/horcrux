@@ -68,8 +68,12 @@ router.post("/:id/heartbeat", async (c) => {
     throw new ApiError(422, "heartbeat_capacity_invalid", "Node heartbeat capacity values are inconsistent");
   }
 
+  if (!isSecureNodeEndpoint(heartbeat.endpoint)) {
+    throw new ApiError(422, "heartbeat_endpoint_invalid", "Node advertised endpoint must be HTTPS, except loopback HTTP for development");
+  }
+
   await c.env.DB.prepare(
-    "UPDATE devices SET status=?,storage_capacity=?,storage_used=?,available_storage=?,node_version=?,protocol_version=?,health=?,last_seen=datetime('now') WHERE id=?",
+    "UPDATE devices SET status=?,storage_capacity=?,storage_used=?,available_storage=?,node_version=?,protocol_version=?,endpoint=?,health=?,last_seen=datetime('now') WHERE id=?",
   ).bind(
     heartbeat.status,
     heartbeat.capacityBytes,
@@ -77,12 +81,21 @@ router.post("/:id/heartbeat", async (c) => {
     heartbeat.availableBytes,
     heartbeat.nodeVersion,
     heartbeat.version,
+    heartbeat.endpoint,
     heartbeat.status === "online" ? "healthy" : "degraded",
     node.id,
   ).run();
 
   return c.json({ accepted: true, nodeId: node.id });
 });
+
+function isSecureNodeEndpoint(value: string) {
+  try {
+    const endpoint = new URL(value);
+    const loopback = endpoint.hostname === "localhost" || endpoint.hostname === "127.0.0.1" || endpoint.hostname === "[::1]";
+    return endpoint.pathname === "/" && !endpoint.search && !endpoint.hash && (endpoint.protocol === "https:" || (endpoint.protocol === "http:" && loopback));
+  } catch { return false; }
+}
 
 router.post("/:id/capabilities", requireAuth, async (c) => {
   const parsed = capabilityRequestSchema.safeParse(await c.req.json().catch(() => null));

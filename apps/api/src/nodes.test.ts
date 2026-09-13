@@ -108,6 +108,7 @@ describe("storage node control plane", () => {
       usedBytes: 4_000,
       availableBytes: 6_000,
       nodeVersion: "0.1.0",
+      endpoint: "https://192.168.1.42:9443",
       timestamp: now,
     };
     const response = await app.request("http://api/nodes/node-a/heartbeat", {
@@ -117,7 +118,7 @@ describe("storage node control plane", () => {
     }, environment(database));
 
     expect(response.status).toBe(200);
-    expect(database.runs[0]?.bindings).toEqual(["online", 10_000, 4_000, 6_000, "0.1.0", "1", "healthy", "node-a"]);
+    expect(database.runs[0]?.bindings).toEqual(["online", 10_000, 4_000, 6_000, "0.1.0", "1", "https://192.168.1.42:9443", "healthy", "node-a"]);
   });
 
   test("issues an object-scoped grant and accepts only its matching node receipt", async () => {
@@ -159,7 +160,7 @@ describe("storage node control plane", () => {
     expect(receiptResponse.status).toBe(200);
     expect(database.batches).toBe(1);
 
-    const tampered = `${receipt.slice(0, -1)}${receipt.endsWith("a") ? "b" : "a"}`;
+    const tampered = `${receipt[0] === "a" ? "b" : "a"}${receipt.slice(1)}`;
     const rejected = await app.request("http://api/nodes/node-a/receipts", {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },

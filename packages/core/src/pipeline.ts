@@ -56,7 +56,9 @@ export class BrowserFilePipeline {
     telemetry.enter("distributing");
     const tasks: DistributionTask[] = [
       ...encoded.shards.map((bytes, index) => ({ kind: "shard" as const, index, bytes, nodeId: nodeIds[index % nodeIds.length]!, shardType: index < config.dataShards ? "data" as const : "parity" as const })),
-      ...shares.map((bytes, index) => ({ kind: "key-share" as const, index, bytes, nodeId: nodeIds[(index + config.dataShards) % nodeIds.length]! })),
+      // Pair logical shard/share index N on one physical node. With five distinct
+      // placements, losing any two nodes still leaves three shards and three shares.
+      ...shares.map((bytes, index) => ({ kind: "key-share" as const, index, bytes, nodeId: nodeIds[index % nodeIds.length]! })),
     ];
     const completed: ObjectPlacement[] = [];
     let objects: ObjectPlacement[];

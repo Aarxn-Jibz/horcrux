@@ -28,6 +28,6 @@ go build ./cmd/horcrux-node
 go run ./cmd/horcrux-node --help
 ```
 
-Required runtime configuration is the control-plane Ed25519 public verification key. `--control-plane-url` enables outbound signed heartbeats. Enrollment additionally requires `--enrollment-challenge` and the short-lived `HORCRUX_ENROLLMENT_TOKEN`; the daemon clears that environment variable after the one-shot exchange.
+Required runtime configuration is the control-plane Ed25519 public verification key. `--control-plane-url` enables outbound signed heartbeats and requires `--advertise-url`, an absolute browser-reachable HTTPS origin (loopback HTTP is only allowed for local development). The endpoint is signed with capacity/health information, then persisted by the control plane for browser placement and download manifests. Keep `--listen` separate from `--advertise-url`, and use `--web-origin` for one exact Vite/production web origin. Enrollment additionally requires `--enrollment-challenge` and the short-lived `HORCRUX_ENROLLMENT_TOKEN`; the daemon clears that environment variable after the one-shot exchange.
 
 No production WebRTC, STUN, or TURN implementation is included yet. The current direct HTTP API is the local/LAN development transport and the correctness foundation for a future WebRTC data channel.

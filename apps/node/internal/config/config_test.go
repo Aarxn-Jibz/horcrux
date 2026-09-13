@@ -32,7 +32,7 @@ func TestEnrollmentConfigurationIsAllOrNothing(t *testing.T) {
 	if _, err := Parse(append(key, "--enrollment-token", "token")); err == nil {
 		t.Fatal("enrollment without challenge was accepted")
 	}
-	args := append(key, "--enrollment-challenge", "challenge", "--enrollment-token", "token", "--control-plane-url", "https://control.example")
+	args := append(key, "--enrollment-challenge", "challenge", "--enrollment-token", "token", "--control-plane-url", "https://control.example", "--advertise-url", "https://192.168.1.42:9443")
 	if _, err := Parse(args); err != nil {
 		t.Fatalf("complete enrollment configuration was rejected: %v", err)
 	}

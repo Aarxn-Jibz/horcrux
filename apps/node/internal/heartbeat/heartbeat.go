@@ -29,6 +29,7 @@ type Payload struct {
 	UsedBytes      int64  `json:"usedBytes"`
 	AvailableBytes int64  `json:"availableBytes"`
 	NodeVersion    string `json:"nodeVersion"`
+	Endpoint       string `json:"endpoint"`
 	Timestamp      int64  `json:"timestamp"`
 }
 
@@ -40,6 +41,7 @@ type Reporter struct {
 	ControlPlaneURL string
 	NodeID          string
 	NodeVersion     string
+	Endpoint        string
 	Interval        time.Duration
 	Stats           StatsProvider
 	Signer          receipt.PayloadSigner
@@ -75,7 +77,7 @@ func (reporter *Reporter) Report(ctx context.Context) error {
 	if reporter.Now != nil {
 		now = reporter.Now().UTC()
 	}
-	payload := Payload{Version: ProtocolVersion, NodeID: reporter.NodeID, Status: "online", CapacityBytes: stats.CapacityBytes, UsedBytes: stats.UsedBytes, AvailableBytes: stats.AvailableBytes, NodeVersion: reporter.NodeVersion, Timestamp: now.Unix()}
+	payload := Payload{Version: ProtocolVersion, NodeID: reporter.NodeID, Status: "online", CapacityBytes: stats.CapacityBytes, UsedBytes: stats.UsedBytes, AvailableBytes: stats.AvailableBytes, NodeVersion: reporter.NodeVersion, Endpoint: reporter.Endpoint, Timestamp: now.Unix()}
 	token, err := Sign(payload, reporter.Signer)
 	if err != nil {
 		return err
@@ -130,7 +132,7 @@ func Verify(token string, publicKey ed25519.PublicKey) (Payload, error) {
 	decoder := json.NewDecoder(bytes.NewReader(payloadBytes))
 	decoder.DisallowUnknownFields()
 	var payload Payload
-	if err := decoder.Decode(&payload); err != nil || payload.Version != ProtocolVersion || payload.NodeID == "" || payload.Status != "online" || payload.CapacityBytes < 0 || payload.UsedBytes < 0 || payload.AvailableBytes < 0 || payload.NodeVersion == "" {
+	if err := decoder.Decode(&payload); err != nil || payload.Version != ProtocolVersion || payload.NodeID == "" || payload.Status != "online" || payload.CapacityBytes < 0 || payload.UsedBytes < 0 || payload.AvailableBytes < 0 || payload.NodeVersion == "" || payload.Endpoint == "" {
 		return Payload{}, ErrInvalidHeartbeat
 	}
 	return payload, nil

@@ -52,11 +52,11 @@ func TestReporterSendsSignedCapacityPayload(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusNoContent, Body: io.NopCloser(bytes.NewReader(nil)), Header: make(http.Header)}, nil
 	})}
 
-	reporter := Reporter{ControlPlaneURL: "https://control.example", NodeID: "node-a", NodeVersion: "0.1.0", Stats: testStats{storage.Stats{CapacityBytes: 1000, UsedBytes: 250, AvailableBytes: 750}}, Signer: testSigner{privateKey}, Client: client, Now: func() time.Time { return now }}
+	reporter := Reporter{ControlPlaneURL: "https://control.example", NodeID: "node-a", NodeVersion: "0.1.0", Endpoint: "https://192.168.1.42:9443", Stats: testStats{storage.Stats{CapacityBytes: 1000, UsedBytes: 250, AvailableBytes: 750}}, Signer: testSigner{privateKey}, Client: client, Now: func() time.Time { return now }}
 	if err := reporter.Report(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if received.NodeID != "node-a" || received.CapacityBytes != 1000 || received.UsedBytes != 250 || received.AvailableBytes != 750 || received.NodeVersion != "0.1.0" || received.Timestamp != now.Unix() {
+	if received.NodeID != "node-a" || received.CapacityBytes != 1000 || received.UsedBytes != 250 || received.AvailableBytes != 750 || received.NodeVersion != "0.1.0" || received.Endpoint != "https://192.168.1.42:9443" || received.Timestamp != now.Unix() {
 		t.Fatalf("unexpected heartbeat: %#v", received)
 	}
 }

@@ -48,7 +48,7 @@ export function MockNetwork() {
       {error && <p className="error" role="alert">{error}</p>}
       <section className="data-panel" aria-label="Storage devices">
         <table className="data-table device-table">
-          <thead><tr><th>Device</th><th>State</th><th>Storage</th><th>Health</th><th>Last seen</th><th>Version</th><th><span className="sr-only">Actions</span></th></tr></thead>
+          <thead><tr><th>Device</th><th>State</th><th>Endpoint</th><th>Storage</th><th>Health</th><th>Last seen</th><th>Version</th><th><span className="sr-only">Actions</span></th></tr></thead>
           <tbody>
             {nodes.map((node) => {
               const isMock = node.kind !== "laptop";
@@ -60,6 +60,7 @@ export function MockNetwork() {
                 <tr key={node.id}>
                   <td><div className="device-name"><span className="device-glyph" aria-hidden="true" /><span><strong>{node.name}</strong><small>{isMock ? "Browser mock" : "Laptop node"}</small></span></div></td>
                   <td><span className={`status status-${isOffline ? "offline" : state}`}><span className="status-dot" />{isOffline ? "Offline" : state}</span></td>
+                  <td className="mono">{isMock ? "IndexedDB" : node.endpoint ?? "Awaiting heartbeat"}</td>
                   <td><div className="capacity"><span>{formatBytes(node.storageUsed)} / {formatBytes(node.storageCapacity)}</span><progress className="capacity-track" max={100} value={used} aria-label={`${used}% storage used`} /></div></td>
                   <td className="capitalize">{simulatedOffline ? "unavailable" : node.health ?? (isOffline ? "unknown" : "healthy")}</td>
                   <td title={node.lastSeen ?? undefined}>{relativeLastSeen(node.lastSeen, isMock)}</td>

@@ -90,6 +90,17 @@ describe("complete browser pipeline", () => {
     expect(await sha256(restored)).toBe(await sha256(bytes)); expect(restored).toEqual(bytes);
   });
 
+  test("pairs each shard and key-share index on one physical node", async () => {
+    const { pipeline } = setup();
+    const manifest = await pipeline.upload({ fileId: crypto.randomUUID(), name: "placement.bin", mimeType: "application/octet-stream", bytes: new Uint8Array([1, 2, 3]) }, DEFAULT_PIPELINE, nodes);
+    for (let index = 0; index < 5; index += 1) {
+      const shard = manifest.objects.find((object) => object.kind === "shard" && object.index === index);
+      const share = manifest.objects.find((object) => object.kind === "key-share" && object.index === index);
+      expect(shard?.nodeId).toBe(nodes[index]);
+      expect(share?.nodeId).toBe(nodes[index]);
+    }
+  });
+
   test("fails clearly below the Shamir threshold", async () => {
     const { storage, pipeline } = setup(); const bytes = new TextEncoder().encode("private file");
     const manifest = await pipeline.upload({ fileId: crypto.randomUUID(), name: "private.txt", mimeType: "text/plain", bytes }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes);

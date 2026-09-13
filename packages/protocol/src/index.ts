@@ -41,6 +41,7 @@ export const heartbeatSchema = z.object({
   usedBytes: z.int().nonnegative(),
   availableBytes: z.int().nonnegative(),
   nodeVersion: z.string().min(1).max(64),
+  endpoint: z.string().url().max(512),
   timestamp: z.int().nonnegative(),
 });
 export type NodeHeartbeat = z.infer<typeof heartbeatSchema>;

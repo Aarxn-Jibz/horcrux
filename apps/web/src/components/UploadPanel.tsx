@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { DEFAULT_PIPELINE } from "@horcrux-file-system/shared";
 import { sha256, type PipelineProgressDetail, type PipelineStage } from "@horcrux-file-system/core";
 import { completeFile, deleteFile, initializeFile, updateUploadState } from "../lib/api";
-import { filePipeline } from "../lib/pipeline";
+import { createFilePipeline, storageMode } from "../lib/pipeline";
 import { formatBytes } from "./FileList";
 import { ProgressSteps, TimingSummary } from "./ProgressSteps";
 import { OperationError } from "./OperationError";
@@ -29,9 +29,11 @@ export function UploadPanel({ onComplete }: { onComplete(): void }) {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const plaintextHash = await sha256(bytes);
       setFile(undefined);
-      const initialized = await initializeFile({ fileId, originalName: file.name, mimeType: file.type || "application/octet-stream", originalSize: file.size, plaintextHash, dataShards: DEFAULT_PIPELINE.dataShards, parityShards: DEFAULT_PIPELINE.parityShards, keyShareThreshold: DEFAULT_PIPELINE.keyThreshold, keyShareCount: DEFAULT_PIPELINE.keyShares });
+      const initialized = await initializeFile({ fileId, originalName: file.name, mimeType: file.type || "application/octet-stream", originalSize: file.size, plaintextHash, dataShards: DEFAULT_PIPELINE.dataShards, parityShards: DEFAULT_PIPELINE.parityShards, keyShareThreshold: DEFAULT_PIPELINE.keyThreshold, keyShareCount: DEFAULT_PIPELINE.keyShares, storageMode });
+      const endpoints = new Map(initialized.nodes.flatMap((node) => node.endpoint ? [[node.id, node.endpoint] as const] : []));
+      const pipeline = createFilePipeline(storageMode, endpoints);
       await updateUploadState(fileId, "distributing");
-      const manifest = await filePipeline.upload(
+      const manifest = await pipeline.upload(
         { fileId, name: file.name, mimeType: file.type, bytes, plaintextHash },
         DEFAULT_PIPELINE,
         initialized.nodes.map((node) => node.id),
@@ -63,7 +65,7 @@ export function UploadPanel({ onComplete }: { onComplete(): void }) {
           <span>{file ? formatBytes(file.size) : "Maximum 256 MiB"}</span>
         </label>
         {stage && <ProgressSteps current={stage} />}
-        <details className="advanced-details transfer-details"><summary>Advanced details</summary><p>zstd level 3 · AES-256-GCM · RS 3+2 · Shamir 3-of-5{stage ? ` · Active: ${stage.replace("-", " ")}` : ""}</p><TimingSummary detail={timing} /></details>
+        <details className="advanced-details transfer-details"><summary>Advanced details</summary><p>Mode: {storageMode === "http" ? "enrolled HTTP nodes" : "browser mock"} · zstd level 3 · AES-256-GCM · RS 3+2 · Shamir 3-of-5{stage ? ` · Active: ${stage.replace("-", " ")}` : ""}</p><TimingSummary detail={timing} /></details>
         {error && <OperationError error={error} />}
         <button className="primary upload-submit" disabled={!file || Boolean(stage)} onClick={upload}>Secure and distribute</button>
       </section>

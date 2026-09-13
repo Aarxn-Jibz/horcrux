@@ -25,6 +25,7 @@ type Config struct {
 	EnrollmentToken       string
 	NodeName              string
 	WebOrigin             string
+	AdvertiseURL          string
 }
 
 func Parse(args []string) (Config, error) {
@@ -43,6 +44,7 @@ func Parse(args []string) (Config, error) {
 	set.StringVar(&config.EnrollmentToken, "enrollment-token", os.Getenv("HORCRUX_ENROLLMENT_TOKEN"), "short-lived enrollment token (prefer HORCRUX_ENROLLMENT_TOKEN)")
 	set.StringVar(&config.NodeName, "node-name", "Horcrux laptop", "display name used during enrollment")
 	set.StringVar(&config.WebOrigin, "web-origin", "http://localhost:5173", "exact browser origin allowed to access this node")
+	set.StringVar(&config.AdvertiseURL, "advertise-url", "", "browser-reachable HTTPS storage URL advertised in signed heartbeats")
 	if err := set.Parse(args); err != nil {
 		return Config{}, err
 	}
@@ -70,6 +72,20 @@ func Parse(args []string) (Config, error) {
 	}
 	if config.EnrollmentChallenge != "" && config.ControlPlaneURL == "" {
 		return Config{}, errors.New("control-plane URL is required for enrollment")
+	}
+	if config.ControlPlaneURL != "" && config.AdvertiseURL == "" {
+		return Config{}, errors.New("advertise URL is required when control-plane heartbeats are enabled")
+	}
+	if config.AdvertiseURL != "" {
+		advertised, err := url.Parse(config.AdvertiseURL)
+		if err != nil || advertised.Host == "" || advertised.Path != "" || advertised.RawQuery != "" || advertised.Fragment != "" {
+			return Config{}, errors.New("advertise URL must be an absolute origin without a path")
+		}
+		ip := net.ParseIP(advertised.Hostname())
+		loopback := advertised.Hostname() == "localhost" || (ip != nil && ip.IsLoopback())
+		if advertised.Scheme != "https" && !(advertised.Scheme == "http" && loopback) {
+			return Config{}, errors.New("advertise URL must use HTTPS unless it is loopback")
+		}
 	}
 	if (config.TLSCertificate == "") != (config.TLSKey == "") {
 		return Config{}, errors.New("TLS certificate and key must be configured together")
