@@ -40,11 +40,3 @@ export function createChunkedFilePipeline(endpoints: Map<string, string>) {
     new ZstdCompressionProvider(), new WebCryptoAesGcm(), new WasmReedSolomonProvider(() => reedSolomonFromResponse(fetch(reedSolomonWasmUrl))), new AuditedShamirProvider(), createStorageTransport("http", endpoints),
   );
 }
-
-export function createNetworkFilePipeline(resolveEndpoint: (nodeId: string) => string | Promise<string>) {
-  return createPipeline(new HttpShardTransport({
-    resolveEndpoint,
-    requestCapability: requestNodeCapability,
-    submitReceipt: async (receipt) => { await submitNodeReceipt(receipt); },
-  }));
-}

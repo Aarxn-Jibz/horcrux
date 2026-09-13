@@ -88,7 +88,7 @@ STUN helps endpoints discover public-facing NAT mappings and ICE candidates. It 
 
 TURN is required when carrier-grade NAT, symmetric NAT, strict hotspots, or firewalls defeat direct paths. Both endpoints connect outward and TURN relays already-encrypted object bytes. TURN can observe network metadata, timing, and byte counts, so it is not zero-knowledge with respect to metadata. It must never receive plaintext files or key material, and relay bandwidth has real infrastructure cost.
 
-Implemented now: protocol signaling shapes, direct local/LAN HTTPS semantics, outbound heartbeats, endpoint-independent transports, grants, receipts, and tests. Not implemented now: signaling service, WebRTC data channels, ICE candidate exchange, STUN configuration, TURN credentials/deployment, automatic endpoint discovery, or global relay infrastructure.
+Implemented now: direct local/LAN HTTPS semantics, outbound heartbeats, endpoint-independent transports, grants, receipts, and tests. Not implemented now: signaling service, WebRTC data channels, ICE candidate exchange, STUN configuration, TURN credentials/deployment, automatic endpoint discovery, or global relay infrastructure.
 
 ## Parallelism and instrumentation
 

@@ -64,16 +64,3 @@ export const enrollmentProofSchema = z.object({
   name: z.string().min(1).max(128),
   capacityBytes: z.int().nonnegative(),
 });
-
-export const signalMessageSchema = z.object({
-  sessionId: z.uuid(),
-  senderId: identifier,
-  recipientId: identifier,
-  type: z.enum(["offer", "answer", "ice-candidate"]),
-  payload: z.string().max(64 * 1024),
-});
-export type SignalMessage = z.infer<typeof signalMessageSchema>;
-
-export interface NodeError {
-  error: { code: string; message: string; retryable: boolean };
-}
