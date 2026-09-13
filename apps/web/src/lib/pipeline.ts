@@ -1,5 +1,5 @@
 import reedSolomonWasmUrl from "@subspace/reed-solomon-erasure.wasm/dist/reed_solomon_erasure_bg.wasm?url";
-import { AuditedShamirProvider, BrowserFilePipeline, WasmReedSolomonProvider, WebCryptoAesGcm, ZstdCompressionProvider, reedSolomonFromResponse } from "@horcrux-file-system/core";
+import { AuditedShamirProvider, BrowserFilePipeline, ChunkedFilePipeline, WasmReedSolomonProvider, WebCryptoAesGcm, ZstdCompressionProvider, reedSolomonFromResponse } from "@horcrux-file-system/core";
 import { HttpShardTransport, IndexedDbShardTransport, type ShardTransport } from "@horcrux-file-system/storage";
 import { MOCK_NODE_IDS } from "@horcrux-file-system/shared";
 import { requestNodeCapability, submitNodeReceipt } from "./api";
@@ -33,6 +33,12 @@ export function createStorageTransport(mode: StorageMode, endpoints: Map<string,
 
 export function createFilePipeline(mode: StorageMode, endpoints: Map<string, string> = new Map()) {
   return createPipeline(createStorageTransport(mode, endpoints));
+}
+
+export function createChunkedFilePipeline(endpoints: Map<string, string>) {
+  return new ChunkedFilePipeline(
+    new ZstdCompressionProvider(), new WebCryptoAesGcm(), new WasmReedSolomonProvider(() => reedSolomonFromResponse(fetch(reedSolomonWasmUrl))), new AuditedShamirProvider(), createStorageTransport("http", endpoints),
+  );
 }
 
 export function createNetworkFilePipeline(resolveEndpoint: (nodeId: string) => string | Promise<string>) {

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import type { FileManifest, FileSummary } from "@horcrux-file-system/shared";
-import { DEFAULT_OPERATION_CONCURRENCY, mapBounded, type PipelineProgressDetail, type PipelineStage } from "@horcrux-file-system/core";
+import { DEFAULT_OPERATION_CONCURRENCY, mapBounded, type ChunkedManifest, type PipelineProgressDetail, type PipelineStage } from "@horcrux-file-system/core";
 import { deleteFile, downloadManifest, getFile } from "../lib/api";
-import { createFilePipeline, createStorageTransport } from "../lib/pipeline";
+import { createChunkedFilePipeline, createFilePipeline, createStorageTransport } from "../lib/pipeline";
 import { formatBytes } from "./FileList";
 import { ProgressSteps, TimingSummary } from "./ProgressSteps";
 import { OperationError } from "./OperationError";
@@ -30,7 +30,9 @@ export function FileDetails({ fileId, onChanged, onClose }: { fileId: string; on
       const manifest = await downloadManifest(fileId);
       const endpoints = new Map(manifest.objects.flatMap((object) => object.endpoint ? [[object.nodeId, object.endpoint] as const] : []));
       const mode = endpoints.size > 0 ? "http" : "mock";
-      const bytes = await createFilePipeline(mode, endpoints).download(manifest, (nextStage, detail) => { setStage(nextStage); setTiming(detail); });
+      const bytes = (manifest as FileManifest & { formatVersion?: number }).formatVersion === 2
+        ? await downloadChunked(manifest as unknown as ChunkedManifest, endpoints)
+        : await createFilePipeline(mode, endpoints).download(manifest, (nextStage, detail) => { setStage(nextStage); setTiming(detail); });
       const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: manifest.mimeType }));
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -83,4 +85,12 @@ export function FileDetails({ fileId, onChanged, onClose }: { fileId: string; on
       {!file && error && <OperationError error={error} />}
     </aside>
   );
+}
+
+async function downloadChunked(manifest: ChunkedManifest, endpoints: Map<string, string>) {
+  const chunks: Uint8Array[] = [];
+  await createChunkedFilePipeline(endpoints).downloadTo(manifest, (chunk) => { chunks.push(chunk.slice()); });
+  const size = chunks.reduce((total, chunk) => total + chunk.byteLength, 0); const bytes = new Uint8Array(size); let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return bytes;
 }

@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AuditedShamirProvider, BrowserFilePipeline, WasmReedSolomonProvider, WebCryptoAesGcm, ZstdCompressionProvider, sha256 } from "../packages/core/src";
+import { AuditedShamirProvider, BrowserFilePipeline, ChunkedFilePipeline, type ChunkedManifest, WasmReedSolomonProvider, WebCryptoAesGcm, ZstdCompressionProvider, sha256 } from "../packages/core/src";
 import { HttpShardTransport, type CapabilityRequest } from "../packages/storage/src";
 import { DEFAULT_PIPELINE, type FileManifest } from "../packages/shared/src";
 import { encodeBase64Url } from "../packages/protocol/src";
@@ -21,6 +21,7 @@ describe("five real Go nodes through the HTTP control plane", () => {
   let original: Uint8Array;
   let originalHash = "";
   let manifest: FileManifest;
+  let chunkedManifest: ChunkedManifest;
 
   beforeAll(async () => {
     root = await mkdtemp(join(tmpdir(), "horcrux-five-node-"));
@@ -111,6 +112,22 @@ describe("five real Go nodes through the HTTP control plane", () => {
     const restored = await makePipeline(new Map(authorized.objects.map((object) => [object.nodeId, object.endpoint!]))) .download(authorized);
     expect(restored).toEqual(original);
     expect(await sha256(restored)).toBe(originalHash);
+
+    const chunkedFileId = crypto.randomUUID();
+    const chunkedInput = deterministicBytes(2 * 1024 * 1024 + 19);
+    const chunkedHash = await sha256(chunkedInput);
+    const chunkedInitialized = await request<{ nodes: Array<{ id: string; endpoint: string }> }>("/files/init", {
+      method: "POST",
+      body: JSON.stringify({ fileId: chunkedFileId, originalName: "chunked-cluster.bin", mimeType: "application/octet-stream", originalSize: chunkedInput.byteLength, plaintextHash: chunkedHash, dataShards: 3, parityShards: 2, keyShareThreshold: 3, keyShareCount: 5, storageMode: "http", formatVersion: 2 }),
+    });
+    await request(`/files/${chunkedFileId}/state`, { method: "POST", body: JSON.stringify({ status: "distributing" }) });
+    const chunkedPipeline = makeChunkedPipeline(new Map(chunkedInitialized.nodes.map((node) => [node.id, node.endpoint])));
+    chunkedManifest = await chunkedPipeline.upload({ fileId: chunkedFileId, name: "chunked-cluster.bin", mimeType: "application/octet-stream", size: chunkedInput.byteLength, source: sourceOf(chunkedInput), plaintextHash: chunkedHash }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, chunkedInitialized.nodes.map((node) => node.id));
+    await request(`/files/${chunkedFileId}/complete`, { method: "POST", body: JSON.stringify({ formatVersion: 2, chunkSize: chunkedManifest.chunkSize, chunkCount: chunkedManifest.chunkCount, noncePrefix: chunkedManifest.noncePrefix, objects: chunkedManifest.objects }) });
+    const chunkedAuthorized = await request<ChunkedManifest>(`/files/${chunkedFileId}/download-manifest`);
+    const chunkedOutput: Uint8Array[] = [];
+    await makeChunkedPipeline(new Map(chunkedAuthorized.objects.map((object) => [object.nodeId, object.endpoint!]))) .downloadTo(chunkedAuthorized, (chunk) => { chunkedOutput.push(chunk.slice()); });
+    expect(joinBytes(chunkedOutput)).toEqual(chunkedInput);
   }, 120_000);
 
   test("reconstructs after two real node processes are terminated", async () => {
@@ -123,6 +140,10 @@ describe("five real Go nodes through the HTTP control plane", () => {
     const restored = await makePipeline(new Map(authorized.objects.map((object) => [object.nodeId, object.endpoint!]))) .download(authorized);
     expect(restored).toEqual(original);
     expect(await sha256(restored)).toBe(originalHash);
+    const chunkedAuthorized = await request<ChunkedManifest>(`/files/${chunkedManifest.fileId}/download-manifest`);
+    const chunkedOutput: Uint8Array[] = [];
+    await makeChunkedPipeline(new Map(chunkedAuthorized.objects.map((object) => [object.nodeId, object.endpoint!]))) .downloadTo(chunkedAuthorized, (chunk) => { chunkedOutput.push(chunk.slice()); });
+    expect(await sha256(joinBytes(chunkedOutput))).toBe(await sha256(deterministicBytes(2 * 1024 * 1024 + 19)));
   }, 60_000);
 
   test("fails explicitly after a third real node process is terminated", async () => {
@@ -141,6 +162,17 @@ describe("five real Go nodes through the HTTP control plane", () => {
         submitReceipt: async ({ nodeId, fileId, receipt }) => { await request(`/nodes/${nodeId}/receipts`, { method: "POST", body: JSON.stringify({ fileId, receipt }) }); },
       }),
     );
+  }
+
+  function makeChunkedPipeline(endpoints: Map<string, string>) {
+    return new ChunkedFilePipeline(new ZstdCompressionProvider(), new WebCryptoAesGcm(), new WasmReedSolomonProvider(), new AuditedShamirProvider(), makeTransport(endpoints));
+  }
+  function makeTransport(endpoints: Map<string, string>) {
+    return new HttpShardTransport({
+      resolveEndpoint: (nodeId) => endpoints.get(nodeId) ?? Promise.reject(new Error(`Missing endpoint for ${nodeId}`)),
+      requestCapability: async (input: CapabilityRequest) => (await request<{ capability: string }>(`/nodes/${input.nodeId}/capabilities`, { method: "POST", body: JSON.stringify(withoutNodeId(input)) })).capability,
+      submitReceipt: async ({ nodeId, fileId, receipt }) => { await request(`/nodes/${nodeId}/receipts`, { method: "POST", body: JSON.stringify({ fileId, receipt }) }); },
+    });
   }
 
   async function request<T = unknown>(path: string, init: RequestInit = {}, authenticated = true): Promise<T> {
@@ -172,6 +204,8 @@ function verifyOpaqueNodeStorage(manifest: FileManifest, nodes: Node[], original
     }
   }
 }
+function sourceOf(bytes: Uint8Array) { return async function* () { for (let offset = 0; offset < bytes.byteLength; offset += 65_537) yield bytes.slice(offset, offset + 65_537); }; }
+function joinBytes(chunks: Uint8Array[]) { const total = chunks.reduce((size, chunk) => size + chunk.byteLength, 0); const output = new Uint8Array(total); let offset = 0; for (const chunk of chunks) { output.set(chunk, offset); offset += chunk.byteLength; } return output; }
 
 async function run(command: string[], cwd: string) {
   const child = Bun.spawn(command, { cwd, env: { ...globalThis.process.env, GOCACHE: "/tmp/horcrux-go-cache", GOMODCACHE: "/tmp/horcrux-go-mod" }, stdout: "pipe", stderr: "pipe" });

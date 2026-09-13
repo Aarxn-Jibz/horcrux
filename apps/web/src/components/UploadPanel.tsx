@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
 import { DEFAULT_PIPELINE } from "@horcrux-file-system/shared";
-import { sha256, type PipelineProgressDetail, type PipelineStage } from "@horcrux-file-system/core";
+import { Sha256Stream, sha256, type PipelineProgressDetail, type PipelineStage } from "@horcrux-file-system/core";
 import { completeFile, deleteFile, initializeFile, updateUploadState } from "../lib/api";
-import { createFilePipeline, storageMode } from "../lib/pipeline";
+import { createChunkedFilePipeline, createFilePipeline, storageMode } from "../lib/pipeline";
 import { formatBytes } from "./FileList";
 import { ProgressSteps, TimingSummary } from "./ProgressSteps";
 import { OperationError } from "./OperationError";
@@ -17,7 +17,7 @@ export function UploadPanel({ onComplete }: { onComplete(): void }) {
 
   async function upload() {
     if (!file) return;
-    if (file.size > DEFAULT_PIPELINE.maxFileBytes) {
+    if (storageMode === "mock" && file.size > DEFAULT_PIPELINE.maxFileBytes) {
       setError({ message: "This browser pipeline currently supports files up to 256 MiB." });
       return;
     }
@@ -26,19 +26,15 @@ export function UploadPanel({ onComplete }: { onComplete(): void }) {
     const fileId = crypto.randomUUID();
     try {
       setStage("preparing");
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const plaintextHash = await sha256(bytes);
+      const bytes = storageMode === "mock" ? new Uint8Array(await file.arrayBuffer()) : undefined;
+      const plaintextHash = bytes ? await sha256(bytes) : await hashFile(file);
       setFile(undefined);
-      const initialized = await initializeFile({ fileId, originalName: file.name, mimeType: file.type || "application/octet-stream", originalSize: file.size, plaintextHash, dataShards: DEFAULT_PIPELINE.dataShards, parityShards: DEFAULT_PIPELINE.parityShards, keyShareThreshold: DEFAULT_PIPELINE.keyThreshold, keyShareCount: DEFAULT_PIPELINE.keyShares, storageMode });
+      const initialized = await initializeFile({ fileId, originalName: file.name, mimeType: file.type || "application/octet-stream", originalSize: file.size, plaintextHash, dataShards: DEFAULT_PIPELINE.dataShards, parityShards: DEFAULT_PIPELINE.parityShards, keyShareThreshold: DEFAULT_PIPELINE.keyThreshold, keyShareCount: DEFAULT_PIPELINE.keyShares, storageMode, ...(storageMode === "http" ? { formatVersion: 2 } : {}) });
       const endpoints = new Map(initialized.nodes.flatMap((node) => node.endpoint ? [[node.id, node.endpoint] as const] : []));
-      const pipeline = createFilePipeline(storageMode, endpoints);
       await updateUploadState(fileId, "distributing");
-      const manifest = await pipeline.upload(
-        { fileId, name: file.name, mimeType: file.type, bytes, plaintextHash },
-        DEFAULT_PIPELINE,
-        initialized.nodes.map((node) => node.id),
-        (nextStage, detail) => { setStage(nextStage); setTiming(detail); },
-      );
+      const manifest = storageMode === "http"
+        ? await createChunkedFilePipeline(endpoints).upload({ fileId, name: file.name, mimeType: file.type, size: file.size, source: () => fileStream(file), plaintextHash }, DEFAULT_PIPELINE, initialized.nodes.map((node) => node.id))
+        : await createFilePipeline(storageMode, endpoints).upload({ fileId, name: file.name, mimeType: file.type, bytes: bytes!, plaintextHash }, DEFAULT_PIPELINE, initialized.nodes.map((node) => node.id), (nextStage, detail) => { setStage(nextStage); setTiming(detail); });
       setStage("saving");
       await completeFile(fileId, manifest);
       setStage("complete");
@@ -72,3 +68,6 @@ export function UploadPanel({ onComplete }: { onComplete(): void }) {
     </details>
   );
 }
+
+async function hashFile(file: File) { const hash = new Sha256Stream(); for await (const chunk of fileStream(file)) hash.update(chunk); return hash.hex(); }
+async function* fileStream(file: File): AsyncGenerator<Uint8Array> { const reader = file.stream().getReader(); try { while (true) { const next = await reader.read(); if (next.done) return; yield next.value; } } finally { reader.releaseLock(); } }

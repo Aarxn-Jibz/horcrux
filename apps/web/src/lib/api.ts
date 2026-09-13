@@ -1,3 +1,4 @@
+import type { ChunkedManifest } from "@horcrux-file-system/core";
 import type { FileManifest, FileSummary, StorageNodeContract } from "@horcrux-file-system/shared";
 import type { CapabilityRequest } from "@horcrux-file-system/storage";
 
@@ -21,7 +22,13 @@ export async function listFiles() { return (await request<{ files: FileSummary[]
 export async function listDevices() { return (await request<{ devices: StorageNodeContract[] }>("/devices")).devices; }
 export function initializeFile(body: unknown) { return request<{ fileId: string; uploadSessionId: string; nodes: StorageNodeContract[] }>("/files/init", { method: "POST", body: JSON.stringify(body) }); }
 export function updateUploadState(fileId: string, status: "distributing" | "aborted") { return request<void>(`/files/${fileId}/state`, { method: "POST", body: JSON.stringify({ status }) }); }
-export function completeFile(fileId: string, manifest: FileManifest) { return request<{ fileId: string; status: string }>(`/files/${fileId}/complete`, { method: "POST", body: JSON.stringify({ compressedSize: manifest.compressedSize, encryptedSize: manifest.encryptedSize, ciphertextHash: manifest.ciphertextHash, encryptionIv: manifest.encryptionIv, shardSize: manifest.shardSize, objects: manifest.objects }) }); }
+export function completeFile(fileId: string, manifest: FileManifest | ChunkedManifest) {
+  const body = isChunkedManifest(manifest)
+    ? { formatVersion: 2, chunkSize: manifest.chunkSize, chunkCount: manifest.chunkCount, noncePrefix: manifest.noncePrefix, objects: manifest.objects }
+    : { compressedSize: manifest.compressedSize, encryptedSize: manifest.encryptedSize, ciphertextHash: manifest.ciphertextHash, encryptionIv: manifest.encryptionIv, shardSize: manifest.shardSize, objects: manifest.objects };
+  return request<{ fileId: string; status: string }>(`/files/${fileId}/complete`, { method: "POST", body: JSON.stringify(body) });
+}
+function isChunkedManifest(manifest: FileManifest | ChunkedManifest): manifest is ChunkedManifest { return "formatVersion" in manifest && manifest.formatVersion === 2; }
 export function downloadManifest(fileId: string) { return request<FileManifest>(`/files/${fileId}/download-manifest`); }
 export function getFile(fileId: string) { return request<FileSummary & { objects: FileManifest["objects"] }>(`/files/${fileId}`); }
 export function deleteFile(fileId: string) { return request<void>(`/files/${fileId}`, { method: "DELETE" }); }
