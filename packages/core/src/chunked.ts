@@ -6,6 +6,7 @@ import type { EncryptionProvider } from "./aes";
 import type { ErasureCodingProvider } from "./reed-solomon";
 import type { SecretSharingProvider } from "./shamir";
 import { Sha256Stream } from "./sha256-stream";
+import { isFileSink, type ReconstructionOutput } from "./output";
 
 export const CHUNKED_FORMAT_VERSION = 2;
 export const CHUNKED_PLAINTEXT_BYTES = 1024 * 1024;
@@ -57,7 +58,7 @@ export class ChunkedFilePipeline {
   }
 
   /** Reconstructs v2 directly to a consumer; no complete plaintext or shard is accumulated. */
-  async downloadTo(manifest: ChunkedManifest, write: (chunk: Uint8Array) => Promise<void> | void) {
+  async downloadTo(manifest: ChunkedManifest, output: ReconstructionOutput) {
     if (!this.storage.getShardStream) throw new Error("Selected storage transport does not support chunked downloads");
     const shares = await this.retrieveShares(manifest);
     let key: Uint8Array;
@@ -90,10 +91,16 @@ export class ChunkedFilePipeline {
         const compressed = await decryptFrame(key, prefix, manifest.fileId, manifest.originalSize, index, first.originalLength, encrypted); encrypted.fill(0);
         const plaintext = await this.compression.decompress(compressed); compressed.fill(0);
         if (plaintext.byteLength !== first.originalLength) { plaintext.fill(0); throw new Error("Chunk decompression length does not match authenticated frame metadata"); }
-        written += plaintext.byteLength; originalHash.update(plaintext); await write(plaintext); plaintext.fill(0);
+        written += plaintext.byteLength; originalHash.update(plaintext);
+        if (isFileSink(output)) await output.write(plaintext); else await output(plaintext);
+        plaintext.fill(0);
       }
       await Promise.all(readers.map((reader) => reader.finish()));
       if (written !== manifest.originalSize || originalHash.hex() !== manifest.plaintextHash) throw new Error("Restored file failed integrity verification");
+      if (isFileSink(output)) await output.close();
+    } catch (error) {
+      if (isFileSink(output)) await output.abort(error).catch(() => {});
+      throw error;
     } finally { key.fill(0); }
   }
 
