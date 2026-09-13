@@ -1,11 +1,12 @@
 import reedSolomonWasmUrl from "@subspace/reed-solomon-erasure.wasm/dist/reed_solomon_erasure_bg.wasm?url";
 import { AuditedShamirProvider, BrowserFilePipeline, ChunkedFilePipeline, WasmReedSolomonProvider, WebCryptoAesGcm, ZstdCompressionProvider, reedSolomonFromResponse } from "@horcrux-file-system/core";
-import { HttpShardTransport, IndexedDbShardTransport, type ShardTransport } from "@horcrux-file-system/storage";
+import { HttpShardTransport, IndexedDbShardTransport, WebRtcShardTransport, type ShardTransport } from "@horcrux-file-system/storage";
+import { HorcruxPeer } from "./webrtc-peer";
 import { MOCK_NODE_IDS } from "@horcrux-file-system/shared";
 import { requestNodeCapability, submitNodeReceipt } from "./api";
 
-export type StorageMode = "mock" | "http";
-export const storageMode: StorageMode = import.meta.env.VITE_HORCRUX_STORAGE_MODE === "http" ? "http" : "mock";
+export type StorageMode = "mock" | "http" | "webrtc";
+export const storageMode: StorageMode = import.meta.env.VITE_HORCRUX_STORAGE_MODE === "webrtc" ? "webrtc" : import.meta.env.VITE_HORCRUX_STORAGE_MODE === "http" ? "http" : "mock";
 export const mockStorage = new IndexedDbShardTransport(MOCK_NODE_IDS);
 
 function createPipeline(storage: ShardTransport) {
@@ -20,6 +21,7 @@ function createPipeline(storage: ShardTransport) {
 
 export function createStorageTransport(mode: StorageMode, endpoints: Map<string, string> = new Map()): ShardTransport {
   if (mode === "mock") return mockStorage;
+  if (mode === "webrtc") return new WebRtcShardTransport(async (nodeId) => (await HorcruxPeer.connect(nodeId)).channel, requestNodeCapability);
   return new HttpShardTransport({
     resolveEndpoint: (nodeId) => {
       const endpoint = endpoints.get(nodeId);
@@ -35,8 +37,8 @@ export function createFilePipeline(mode: StorageMode, endpoints: Map<string, str
   return createPipeline(createStorageTransport(mode, endpoints));
 }
 
-export function createChunkedFilePipeline(endpoints: Map<string, string>) {
+export function createChunkedFilePipeline(endpoints: Map<string, string>, mode: StorageMode = "http") {
   return new ChunkedFilePipeline(
-    new ZstdCompressionProvider(), new WebCryptoAesGcm(), new WasmReedSolomonProvider(() => reedSolomonFromResponse(fetch(reedSolomonWasmUrl))), new AuditedShamirProvider(), createStorageTransport("http", endpoints),
+    new ZstdCompressionProvider(), new WebCryptoAesGcm(), new WasmReedSolomonProvider(() => reedSolomonFromResponse(fetch(reedSolomonWasmUrl))), new AuditedShamirProvider(), createStorageTransport(mode, endpoints),
   );
 }

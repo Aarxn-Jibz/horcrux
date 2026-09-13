@@ -29,11 +29,11 @@ export function UploadPanel({ onComplete }: { onComplete(): void }) {
       const bytes = storageMode === "mock" ? new Uint8Array(await file.arrayBuffer()) : undefined;
       const plaintextHash = bytes ? await sha256(bytes) : await hashFile(file);
       setFile(undefined);
-      const initialized = await initializeFile({ fileId, originalName: file.name, mimeType: file.type || "application/octet-stream", originalSize: file.size, plaintextHash, dataShards: DEFAULT_PIPELINE.dataShards, parityShards: DEFAULT_PIPELINE.parityShards, keyShareThreshold: DEFAULT_PIPELINE.keyThreshold, keyShareCount: DEFAULT_PIPELINE.keyShares, storageMode, ...(storageMode === "http" ? { formatVersion: 2 } : {}) });
+      const initialized = await initializeFile({ fileId, originalName: file.name, mimeType: file.type || "application/octet-stream", originalSize: file.size, plaintextHash, dataShards: DEFAULT_PIPELINE.dataShards, parityShards: DEFAULT_PIPELINE.parityShards, keyShareThreshold: DEFAULT_PIPELINE.keyThreshold, keyShareCount: DEFAULT_PIPELINE.keyShares, storageMode, ...(storageMode !== "mock" ? { formatVersion: 2 } : {}) });
       const endpoints = new Map(initialized.nodes.flatMap((node) => node.endpoint ? [[node.id, node.endpoint] as const] : []));
       await updateUploadState(fileId, "distributing");
-      const manifest = storageMode === "http"
-        ? await createChunkedFilePipeline(endpoints).upload({ fileId, name: file.name, mimeType: file.type, size: file.size, source: () => fileStream(file), plaintextHash }, DEFAULT_PIPELINE, initialized.nodes.map((node) => node.id))
+      const manifest = storageMode !== "mock"
+        ? await createChunkedFilePipeline(endpoints, storageMode).upload({ fileId, name: file.name, mimeType: file.type, size: file.size, source: () => fileStream(file), plaintextHash }, DEFAULT_PIPELINE, initialized.nodes.map((node) => node.id))
         : await createFilePipeline(storageMode, endpoints).upload({ fileId, name: file.name, mimeType: file.type, bytes: bytes!, plaintextHash }, DEFAULT_PIPELINE, initialized.nodes.map((node) => node.id), (nextStage, detail) => { setStage(nextStage); setTiming(detail); });
       setStage("saving");
       await completeFile(fileId, manifest);
