@@ -210,8 +210,10 @@ header { display: flex; height: 56px; align-items: center; justify-content: spac
 .device-glyph { position: relative; width: 20px; height: 14px; border: 1px solid var(--border-strong); border-radius: 2px; }
 .device-glyph::after { position: absolute; right: 4px; bottom: -4px; left: 4px; height: 1px; background: var(--border-strong); content: ""; }
 .capacity { display: grid; min-width: 140px; gap: 6px; }
-.capacity-track { display: block; height: 2px; overflow: hidden; background: var(--border-subtle); }
-.capacity-track > span { display: block; height: 100%; background: var(--text-muted); }
+.capacity-track { display: block; width: 100%; height: 2px; overflow: hidden; border: 0; appearance: none; background: var(--border-subtle); }
+.capacity-track::-webkit-progress-bar { background: var(--border-subtle); }
+.capacity-track::-webkit-progress-value { background: var(--text-muted); }
+.capacity-track::-moz-progress-bar { background: var(--text-muted); }
 .node-toggle { min-width: 90px; height: 30px; min-height: 30px; padding: 0 var(--space-2); font-size: .6875rem; }
 
 @media (max-width: 760px) {
