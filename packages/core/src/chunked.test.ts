@@ -35,6 +35,15 @@ describe("v2 chunked file format", () => {
     expect(new Sha256Stream().update(join(output)).hex()).toBe(new Sha256Stream().update(input).hex());
   }, 120_000);
 
+  test("replaces a malformed selected shard without weakening frame authentication", async () => {
+    const storage = new MemoryShardTransport(nodes); const input = generated(3 * CHUNKED_PLAINTEXT_BYTES + 9); const instance = pipeline(storage);
+    const manifest = await instance.upload({ fileId: crypto.randomUUID(), name: "corrupt.bin", mimeType: "application/octet-stream", size: input.byteLength, source: source(input) }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes);
+    const firstShard = manifest.objects.find((object) => object.kind === "shard" && object.index === 0)!;
+    storage.corruptObject(firstShard.nodeId, firstShard.objectId);
+    const output: Uint8Array[] = []; await instance.downloadTo(manifest, (chunk) => { output.push(chunk.slice()); });
+    expect(new Sha256Stream().update(join(output)).hex()).toBe(new Sha256Stream().update(input).hex());
+  }, 120_000);
+
   test("closes a streaming sink after verified reconstruction", async () => {
     const storage = new MemoryShardTransport(nodes); const input = generated(CHUNKED_PLAINTEXT_BYTES + 7); const instance = pipeline(storage);
     const manifest = await instance.upload({ fileId: crypto.randomUUID(), name: "sink.bin", mimeType: "application/octet-stream", size: input.byteLength, source: source(input) }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes);

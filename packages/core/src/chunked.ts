@@ -73,9 +73,10 @@ export class ChunkedFilePipeline {
         const records: Awaited<ReturnType<RecordReader["next"]>>[] = [];
         for (let readerIndex = 0; readerIndex < readers.length; readerIndex += 1) {
           const reader = readers[readerIndex]!;
+          const recordStart = reader.offset;
           try { records.push(await reader.next()); }
           catch (error) {
-            const replacement = await this.replaceReader(manifest, available, selected, readers, readerIndex, reader.offset);
+            const replacement = await this.replaceReader(manifest, available, selected, readers, readerIndex, recordStart);
             if (!replacement) throw new Error(`Unable to replace failed shard stream at frame ${index}: ${error instanceof Error ? error.message : "unknown stream failure"}`);
             selected = replacement.selected;
             readers[readerIndex] = replacement.reader;
