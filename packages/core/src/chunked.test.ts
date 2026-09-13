@@ -35,6 +35,14 @@ describe("v2 chunked file format", () => {
     expect(new Sha256Stream().update(join(output)).hex()).toBe(new Sha256Stream().update(input).hex());
   }, 120_000);
 
+  test("closes a streaming sink after verified reconstruction", async () => {
+    const storage = new MemoryShardTransport(nodes); const input = generated(CHUNKED_PLAINTEXT_BYTES + 7); const instance = pipeline(storage);
+    const manifest = await instance.upload({ fileId: crypto.randomUUID(), name: "sink.bin", mimeType: "application/octet-stream", size: input.byteLength, source: source(input) }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes);
+    const output: Uint8Array[] = []; let closed = false; let aborted = false;
+    await instance.downloadTo(manifest, { write: async (chunk) => { output.push(chunk.slice()); }, close: async () => { closed = true; }, abort: async () => { aborted = true; } });
+    expect(join(output)).toEqual(input); expect(closed).toBeTrue(); expect(aborted).toBeFalse();
+  }, 120_000);
+
   test("fails below three physical nodes", async () => {
     const storage = new MemoryShardTransport(nodes); const input = generated(CHUNKED_PLAINTEXT_BYTES + 7); const instance = pipeline(storage);
     const manifest = await instance.upload({ fileId: crypto.randomUUID(), name: "failure.bin", mimeType: "application/octet-stream", size: input.byteLength, source: source(input) }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes);

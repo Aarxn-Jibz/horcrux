@@ -210,7 +210,6 @@ function verifyOpaqueNodeStorage(manifest: FileManifest, nodes: Node[], original
 }
 async function hashGenerated(size: number) { const hash = new Sha256Stream(); for await (const chunk of generatedSource(size)) hash.update(chunk); return hash.hex(); }
 async function* generatedSource(size: number) { for (let offset = 0; offset < size; offset += 65_537) { const length = Math.min(65_537, size - offset); const chunk = new Uint8Array(length); for (let index = 0; index < length; index += 1) chunk[index] = ((offset + index) * 31 + (offset + index >>> 7)) & 0xff; yield chunk; } }
-function joinBytes(chunks: Uint8Array[]) { const total = chunks.reduce((size, chunk) => size + chunk.byteLength, 0); const output = new Uint8Array(total); let offset = 0; for (const chunk of chunks) { output.set(chunk, offset); offset += chunk.byteLength; } return output; }
 
 async function run(command: string[], cwd: string) {
   const child = Bun.spawn(command, { cwd, env: { ...globalThis.process.env, GOCACHE: "/tmp/horcrux-go-cache", GOMODCACHE: "/tmp/horcrux-go-mod" }, stdout: "pipe", stderr: "pipe" });
