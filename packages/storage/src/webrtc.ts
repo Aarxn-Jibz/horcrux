@@ -1,0 +1,19 @@
+import type { ByteStream, PutShardOptions, ShardTransport, StoredObjectRef } from "./index";
+
+type Connect = (nodeId: string) => Promise<RTCDataChannel>;
+type Grant = (request:{nodeId:string;fileId:string;objectId:string;operation:"PUT"|"GET"|"DELETE";maxSize?:number})=>Promise<string>;
+const CHUNK = 64 * 1024;
+export class WebRtcShardTransport implements ShardTransport {
+ constructor(private readonly connect: Connect, private readonly grant: Grant) {}
+ async putShard(nodeId:string, objectId:string, bytes:Uint8Array, options:PutShardOptions={}):Promise<StoredObjectRef>{ return this.putShardStream(nodeId,objectId,(async function*(){yield bytes})(),{...options,maxSize:bytes.byteLength}); }
+ async putShardStream(nodeId:string, objectId:string, stream:ByteStream, options:PutShardOptions & {maxSize:number}):Promise<StoredObjectRef>{const channel=await this.connect(nodeId); await control(channel,{type:"put-init",objectId,capability:await this.grant({nodeId,fileId:fileId(objectId),objectId,operation:"PUT",maxSize:options.maxSize})});for await(const input of stream){for(let offset=0;offset<input.byteLength;offset+=CHUNK){await drain(channel);channel.send(input.slice(offset,offset+CHUNK));}}channel.send(JSON.stringify({type:"put-finish"}));const receipt=await waitControl(channel,"receipt");return {nodeId,objectId,size:receipt.size,checksum:receipt.checksum};}
+ async getShard(nodeId:string, objectId:string, signal?:AbortSignal){const chunks:Uint8Array[]=[];for await(const chunk of await this.getShardStream(nodeId,objectId,signal))chunks.push(chunk);const size=chunks.reduce((n,c)=>n+c.byteLength,0),out=new Uint8Array(size);let at=0;for(const c of chunks){out.set(c,at);at+=c.byteLength;}return out;}
+ async getShardStream(nodeId:string, objectId:string, _signal?:AbortSignal, start=0){const channel=await this.connect(nodeId);channel.send(JSON.stringify({type:"get",objectId,size:start,capability:await this.grant({nodeId,fileId:fileId(objectId),objectId,operation:"GET"})}));return incoming(channel);}
+ async deleteShard(nodeId:string,objectId:string){const channel=await this.connect(nodeId);channel.send(JSON.stringify({type:"delete",objectId,capability:await this.grant({nodeId,fileId:fileId(objectId),objectId,operation:"DELETE"})}));await waitControl(channel,"delete-finish");}
+ async healthCheck(nodeId:string){try{const channel=await this.connect(nodeId);channel.close();return true;}catch{return false;}}
+}
+async function control(channel:RTCDataChannel,message:unknown){channel.send(JSON.stringify(message));}
+function drain(channel:RTCDataChannel){if(channel.bufferedAmount<CHUNK*4)return Promise.resolve();channel.bufferedAmountLowThreshold=CHUNK*2;return new Promise<void>((resolve)=>{channel.addEventListener("bufferedamountlow",()=>resolve(),{once:true});});}
+function waitControl(channel:RTCDataChannel,type:string){return new Promise<any>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error("WebRTC operation timed out")),30_000);channel.addEventListener("message",(event)=>{if(typeof event.data!=="string")return;const message=JSON.parse(event.data);if(message.type===type){clearTimeout(timer);resolve(message);}},{once:false});});}
+async function* incoming(channel:RTCDataChannel){const queue:Uint8Array[]=[];let done=false,error:unknown;channel.addEventListener("message",(event)=>{if(typeof event.data==="string"){const control=JSON.parse(event.data);if(control.type==="get-finish")done=true;}else queue.push(new Uint8Array(event.data));});channel.addEventListener("error",()=>{error=new Error("WebRTC channel error");});while(!done||queue.length){if(error)throw error;const next=queue.shift();if(next)yield next;else await new Promise((resolve)=>setTimeout(resolve,1));}}
+function fileId(objectId:string){const slash=objectId.indexOf("/");if(slash<1)throw new Error("Object ID does not contain a file scope");return objectId.slice(0,slash);}

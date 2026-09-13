@@ -14,3 +14,4 @@ export interface ShardTransport {
 export * from "./indexed-db";
 export * from "./memory";
 export * from "./http";
+export * from "./webrtc";
