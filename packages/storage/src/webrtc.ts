@@ -2,6 +2,7 @@ import type { ByteStream, PutShardOptions, ShardTransport, StoredObjectRef } fro
 
 type Connect = (nodeId: string) => Promise<RTCDataChannel>;
 type Grant = (request: { nodeId: string; fileId: string; objectId: string; operation: "PUT" | "GET" | "DELETE"; maxSize?: number }) => Promise<string>;
+type SubmitReceipt = (request: { nodeId: string; fileId: string; receipt: string }) => Promise<void>;
 type Control = { type: string; objectId?: string; size?: number; checksum?: string; capability?: string; message?: string };
 
 const CHUNK = 64 * 1024;
@@ -9,7 +10,7 @@ const TIMEOUT = 30_000;
 
 /** A bounded, ordered DataChannel implementation of the shard transport. */
 export class WebRtcShardTransport implements ShardTransport {
-  constructor(private readonly connect: Connect, private readonly grant: Grant) {}
+  constructor(private readonly connect: Connect, private readonly grant: Grant, private readonly submitReceipt?: SubmitReceipt) {}
 
   async putShard(nodeId: string, objectId: string, bytes: Uint8Array, options: PutShardOptions = {}): Promise<StoredObjectRef> {
     return this.putShardStream(nodeId, objectId, (async function* () { yield bytes; })(), { ...options, maxSize: bytes.byteLength });
@@ -23,6 +24,8 @@ export class WebRtcShardTransport implements ShardTransport {
       for await (const input of stream) for (let offset = 0; offset < input.byteLength; offset += CHUNK) { await drain(channel); channel.send(input.slice(offset, offset + CHUNK)); }
       await sendControl(channel, { type: "put-finish" });
       const result = await receipt;
+      const token = requiredString(result.capability, "storage receipt");
+      await this.submitReceipt?.({ nodeId, fileId: fileId(objectId), receipt: token });
       return { nodeId, objectId, size: requiredNumber(result.size, "receipt size"), checksum: requiredString(result.checksum, "receipt checksum") };
     } finally { channel.close(); }
   }

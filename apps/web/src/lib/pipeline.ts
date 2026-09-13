@@ -21,7 +21,11 @@ function createPipeline(storage: ShardTransport) {
 
 export function createStorageTransport(mode: StorageMode, endpoints: Map<string, string> = new Map()): ShardTransport {
   if (mode === "mock") return mockStorage;
-  if (mode === "webrtc") return new WebRtcShardTransport(async (nodeId) => (await HorcruxPeer.connect(nodeId)).channel, requestNodeCapability);
+  if (mode === "webrtc") return new WebRtcShardTransport(
+    async (nodeId) => (await HorcruxPeer.connect(nodeId)).channel,
+    requestNodeCapability,
+    async (receipt) => { await submitNodeReceipt(receipt); },
+  );
   return new HttpShardTransport({
     resolveEndpoint: (nodeId) => {
       const endpoint = endpoints.get(nodeId);
