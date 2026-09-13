@@ -101,21 +101,31 @@ func ValidateObjectID(objectID string) error {
 }
 
 func (s *Store) Put(ctx context.Context, objectID string, source io.Reader, expectedChecksum string, expectedSize int64) (Metadata, error) {
+	return s.put(ctx, objectID, source, expectedChecksum, expectedSize, expectedSize, true)
+}
+
+// PutBounded accepts a node-attested streamed upload. The authorization max is
+// reserved before consuming the body, so a valid capability cannot fill the disk.
+func (s *Store) PutBounded(ctx context.Context, objectID string, source io.Reader, maximumSize int64) (Metadata, error) {
+	return s.put(ctx, objectID, source, "", 0, maximumSize, false)
+}
+
+func (s *Store) put(ctx context.Context, objectID string, source io.Reader, expectedChecksum string, expectedSize, reservedSize int64, exact bool) (Metadata, error) {
 	if err := ValidateObjectID(objectID); err != nil {
 		return Metadata{}, err
 	}
-	if !checksumPattern.MatchString(expectedChecksum) {
+	if exact && !checksumPattern.MatchString(expectedChecksum) {
 		return Metadata{}, ErrChecksumMismatch
 	}
-	if expectedSize < 0 {
+	if reservedSize < 0 || (exact && expectedSize < 0) {
 		return Metadata{}, ErrSizeMismatch
 	}
-	if existing, found, err := s.reserve(ctx, objectID, expectedChecksum, expectedSize); err != nil {
+	if existing, found, err := s.reserve(ctx, objectID, expectedChecksum, expectedSize, reservedSize, exact); err != nil {
 		return Metadata{}, err
 	} else if found {
 		return existing, nil
 	}
-	defer s.release(objectID, expectedSize)
+	defer s.release(objectID, reservedSize)
 
 	path := s.objectPath(objectID)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -135,15 +145,15 @@ func (s *Store) Put(ctx context.Context, objectID string, source io.Reader, expe
 	}()
 
 	hash := sha256.New()
-	written, copyErr := io.Copy(io.MultiWriter(temporary, hash), io.LimitReader(source, expectedSize+1))
+	written, copyErr := io.Copy(io.MultiWriter(temporary, hash), io.LimitReader(source, reservedSize+1))
 	if copyErr != nil {
 		return Metadata{}, fmt.Errorf("write object: %w", copyErr)
 	}
-	if written != expectedSize {
+	if written > reservedSize || (exact && written != expectedSize) {
 		return Metadata{}, ErrSizeMismatch
 	}
 	actualChecksum := hex.EncodeToString(hash.Sum(nil))
-	if actualChecksum != expectedChecksum {
+	if exact && actualChecksum != expectedChecksum {
 		return Metadata{}, ErrChecksumMismatch
 	}
 	if err := temporary.Sync(); err != nil {
@@ -228,14 +238,14 @@ func (s *Store) Stats(ctx context.Context) (Stats, error) {
 	return Stats{CapacityBytes: s.capacity, UsedBytes: used, AvailableBytes: available}, nil
 }
 
-func (s *Store) reserve(ctx context.Context, objectID, checksum string, size int64) (Metadata, bool, error) {
+func (s *Store) reserve(ctx context.Context, objectID, checksum string, size, reservedSize int64, exact bool) (Metadata, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.pending[objectID]; exists {
 		return Metadata{}, false, ErrConflict
 	}
 	if existing, err := s.Metadata(ctx, objectID); err == nil {
-		if existing.Checksum == checksum && existing.Size == size {
+		if (!exact || (existing.Checksum == checksum && existing.Size == size)) && existing.Size <= reservedSize {
 			return existing, true, nil
 		}
 		return Metadata{}, false, ErrConflict
@@ -246,11 +256,11 @@ func (s *Store) reserve(ctx context.Context, objectID, checksum string, size int
 	if err != nil {
 		return Metadata{}, false, err
 	}
-	if size > stats.AvailableBytes-s.reserved {
+	if reservedSize > stats.AvailableBytes-s.reserved {
 		return Metadata{}, false, ErrCapacity
 	}
 	s.pending[objectID] = struct{}{}
-	s.reserved += size
+	s.reserved += reservedSize
 	return Metadata{}, false, nil
 }
 

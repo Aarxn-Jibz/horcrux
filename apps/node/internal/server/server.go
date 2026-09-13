@@ -104,11 +104,21 @@ func (s *Server) putObject(writer http.ResponseWriter, request *http.Request) {
 	if !ok {
 		return
 	}
-	if request.ContentLength >= 0 && request.ContentLength != *capability.Size {
+	if capability.Size != nil && request.ContentLength >= 0 && request.ContentLength != *capability.Size {
 		writeError(writer, http.StatusUnprocessableEntity, "size_mismatch", "Object size does not match its capability", false)
 		return
 	}
-	metadata, err := s.objects.Put(request.Context(), objectID, request.Body, capability.Checksum, *capability.Size)
+	var metadata storage.Metadata
+	var err error
+	if capability.MaxSize != nil {
+		if request.ContentLength > *capability.MaxSize {
+			writeError(writer, http.StatusUnprocessableEntity, "size_limit_exceeded", "Object exceeds its capability maximum", false)
+			return
+		}
+		metadata, err = s.objects.PutBounded(request.Context(), objectID, request.Body, *capability.MaxSize)
+	} else {
+		metadata, err = s.objects.Put(request.Context(), objectID, request.Body, capability.Checksum, *capability.Size)
+	}
 	if err != nil {
 		writeStorageError(writer, err)
 		return

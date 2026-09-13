@@ -19,7 +19,10 @@ export const storageCapabilitySchema = z.object({
   jti: z.uuid(),
   checksum: checksum.optional(),
   size: z.int().nonnegative().optional(),
-}).refine((value) => value.expiresAt > value.issuedAt, "capability must expire after issuance");
+  /** A streamed PUT is bounded but its final metadata is node-attested. */
+  maxSize: z.int().positive().optional(),
+}).refine((value) => value.expiresAt > value.issuedAt, "capability must expire after issuance")
+  .refine((value) => value.operation !== "PUT" || (value.maxSize !== undefined || (value.checksum !== undefined && value.size !== undefined)), "PUT requires exact metadata or a maximum size");
 export type StorageCapability = z.infer<typeof storageCapabilitySchema>;
 
 export const storageReceiptSchema = z.object({

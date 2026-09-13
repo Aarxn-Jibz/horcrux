@@ -32,6 +32,7 @@ type Capability struct {
 	JTI       string `json:"jti"`
 	Checksum  string `json:"checksum,omitempty"`
 	Size      *int64 `json:"size,omitempty"`
+	MaxSize   *int64 `json:"maxSize,omitempty"`
 }
 
 type Verifier struct {
@@ -94,7 +95,10 @@ func (v Verifier) Verify(token, operation, objectID string) (Capability, error) 
 	if capability.IssuedAt > nowUnix+60 || capability.ExpiresAt <= capability.IssuedAt {
 		return Capability{}, ErrInvalidCapability
 	}
-	if operation == "PUT" && (capability.Checksum == "" || capability.Size == nil || *capability.Size < 0) {
+	if operation == "PUT" && capability.MaxSize != nil && *capability.MaxSize <= 0 {
+		return Capability{}, ErrInvalidCapability
+	}
+	if operation == "PUT" && capability.MaxSize == nil && (capability.Checksum == "" || capability.Size == nil || *capability.Size < 0) {
 		return Capability{}, ErrInvalidCapability
 	}
 	return capability, nil
