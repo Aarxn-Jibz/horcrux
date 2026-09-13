@@ -112,9 +112,12 @@ bun run build:api
 bun run test:node
 bun run build:node
 bun run test:e2e
+bun run test:five-node
 ```
 
 The integration test starts a real Go daemon on loopback and verifies a TS-issued grant, opaque upload, signed receipt, byte-identical download, authorization rejection, and delete. It needs permission to bind a local port.
+
+`bun run test:five-node` is the local HTTP acceptance test. It starts an ephemeral Wrangler/D1 control plane, applies every migration, enrolls five independently identified Go node processes on dynamically allocated loopback ports, uploads through the browser-compatible core pipeline and `HttpShardTransport`, verifies two opaque objects per node, reconstructs with all nodes, terminates two processes and reconstructs again, then verifies a clear failure after a third process stops. It needs permission to bind local ports and does not persist secrets or node data.
 
 ## Cloudflare deployment
 
