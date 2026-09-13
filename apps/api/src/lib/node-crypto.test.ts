@@ -47,4 +47,13 @@ describe("node control-plane cryptography", () => {
     expect(receiptMatchesCapability({ ...receipt, objectId: "other/object" }, capability)).toBeFalse();
     expect(receiptMatchesCapability({ ...receipt, checksum: "b".repeat(64) }, capability)).toBeFalse();
   });
+
+  test("accepts only node-attested streamed receipts within their signed bound", () => {
+    const receipt = { version: "1" as const, nodeId: "node-a", objectId: "file/object", checksum: "c".repeat(64), size: 99, timestamp: 2_000_000_000, requestId: "stream-request" };
+    const capability = { jti: "stream-request", nodeId: "node-a", objectId: "file/object", operation: "PUT" as const, maxSize: 100 };
+    expect(receiptMatchesCapability(receipt, capability)).toBeTrue();
+    expect(receiptMatchesCapability({ ...receipt, size: 101 }, capability)).toBeFalse();
+    expect(receiptMatchesCapability({ ...receipt, nodeId: "node-b" }, capability)).toBeFalse();
+    expect(receiptMatchesCapability({ ...receipt, requestId: "another-request" }, capability)).toBeFalse();
+  });
 });
