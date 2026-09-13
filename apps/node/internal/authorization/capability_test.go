@@ -88,3 +88,21 @@ func TestRejectsTamperedSignature(t *testing.T) {
 		t.Fatalf("expected signature rejection, got %v", err)
 	}
 }
+
+func TestRejectsInvalidOrMixedStreamedPUTBounds(t *testing.T) {
+	verifier, privateKey, now := testVerifier(t)
+	for _, maximum := range []int64{0, -1} {
+		capability := validCapability(now)
+		capability.Checksum, capability.Size = "", nil
+		capability.MaxSize = &maximum
+		if _, err := verifier.Verify(signed(t, capability, privateKey), "PUT", capability.ObjectID); !errors.Is(err, ErrInvalidCapability) {
+			t.Fatalf("maximum %d should be rejected: %v", maximum, err)
+		}
+	}
+	maximum := int64(1024)
+	mixed := validCapability(now)
+	mixed.MaxSize = &maximum
+	if _, err := verifier.Verify(signed(t, mixed, privateKey), "PUT", mixed.ObjectID); !errors.Is(err, ErrInvalidCapability) {
+		t.Fatalf("mixed exact and streamed metadata should be rejected: %v", err)
+	}
+}

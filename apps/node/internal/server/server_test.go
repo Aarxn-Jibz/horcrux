@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -134,6 +135,35 @@ func TestObjectAPIRejectsChecksumMismatch(t *testing.T) {
 	response := perform(node.server.Handler(), http.MethodPut, "/objects/"+objectID, node.capability(t, "PUT", objectID, expected), []byte("tampered"))
 	if response.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("checksum mismatch returned %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestStreamedPUTAttestsActualMetadataAndEnforcesBound(t *testing.T) {
+	node := setupNode(t)
+	objectID := "file/shard/streamed"
+	maximum := int64(8)
+	capability := authorization.Capability{Version: authorization.ProtocolVersion, Issuer: "horcrux-control-plane", NodeID: node.identity.NodeID, ObjectID: objectID, Operation: "PUT", IssuedAt: node.now.Unix(), ExpiresAt: node.now.Add(time.Minute).Unix(), JTI: "streamed-request-123", MaxSize: &maximum}
+	token, err := authorization.Sign(capability, node.controlKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := perform(node.server.Handler(), http.MethodPut, "/objects/"+objectID, token, []byte("actual"))
+	if stored.Code != http.StatusCreated || !bytes.Contains(stored.Body.Bytes(), []byte(objectChecksum([]byte("actual")))) {
+		t.Fatalf("streamed PUT should attest actual bytes: %d %s", stored.Code, stored.Body.String())
+	}
+	tooLargeID := "file/shard/too-large"
+	capability.ObjectID, capability.JTI = tooLargeID, "streamed-request-456"
+	tooLargeToken, err := authorization.Sign(capability, node.controlKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	overwrote := perform(node.server.Handler(), http.MethodPut, "/objects/"+tooLargeID, tooLargeToken, []byte("too-large"))
+	if overwrote.Code == http.StatusCreated {
+		t.Fatalf("oversized body was accepted")
+	}
+	// Failed bodies are temporary only and never appear as committed objects.
+	if _, _, err := node.server.objects.OpenObject(context.Background(), tooLargeID); err == nil {
+		t.Fatalf("incomplete object was committed")
 	}
 }
 

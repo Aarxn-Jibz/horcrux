@@ -98,6 +98,9 @@ func (v Verifier) Verify(token, operation, objectID string) (Capability, error) 
 	if operation == "PUT" && capability.MaxSize != nil && *capability.MaxSize <= 0 {
 		return Capability{}, ErrInvalidCapability
 	}
+	if operation == "PUT" && capability.MaxSize != nil && (capability.Checksum != "" || capability.Size != nil) {
+		return Capability{}, ErrInvalidCapability
+	}
 	if operation == "PUT" && capability.MaxSize == nil && (capability.Checksum == "" || capability.Size == nil || *capability.Size < 0) {
 		return Capability{}, ErrInvalidCapability
 	}

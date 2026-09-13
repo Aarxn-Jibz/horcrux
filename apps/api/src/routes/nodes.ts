@@ -25,7 +25,7 @@ const enrollmentSchema = z.object({
 type ChallengeRow = { user_id: string; expires_at: string; used_at: string | null };
 type NodeRow = { id: string; public_key: string };
 type IssuedRow = { jti: string; device_id: string; object_id: string; operation: "PUT"; checksum: string | null; size: number | null; expires_at: string };
-const capabilityRequestSchema = z.object({ fileId: z.uuid(), objectId: z.string().min(1).max(256), operation: z.enum(["PUT", "GET", "DELETE"]), checksum: z.string().regex(/^[a-f0-9]{64}$/).optional(), size: z.int().nonnegative().optional(), maxSize: z.int().positive().optional() }).refine((input) => input.operation !== "PUT" || input.maxSize !== undefined || (input.checksum !== undefined && input.size !== undefined), "PUT capabilities require exact metadata or a maximum size");
+const capabilityRequestSchema = z.object({ fileId: z.uuid(), objectId: z.string().min(1).max(256), operation: z.enum(["PUT", "GET", "DELETE"]), checksum: z.string().regex(/^[a-f0-9]{64}$/).optional(), size: z.int().nonnegative().optional(), maxSize: z.int().positive().optional() }).refine((input) => input.operation !== "PUT" || input.maxSize !== undefined || (input.checksum !== undefined && input.size !== undefined), "PUT capabilities require exact metadata or a maximum size").refine((input) => input.maxSize === undefined || (input.checksum === undefined && input.size === undefined), "streamed PUT final metadata is node-attested");
 const router = new Hono<{ Bindings: Env; Variables: ApiVariables }>();
 
 router.post("/enroll", async (c) => {
