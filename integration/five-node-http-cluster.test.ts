@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AuditedShamirProvider, BrowserFilePipeline, ChunkedFilePipeline, type ChunkedManifest, WasmReedSolomonProvider, WebCryptoAesGcm, ZstdCompressionProvider, sha256 } from "../packages/core/src";
+import { AuditedShamirProvider, BrowserFilePipeline, ChunkedFilePipeline, type ChunkedManifest, Sha256Stream, WasmReedSolomonProvider, WebCryptoAesGcm, ZstdCompressionProvider, sha256 } from "../packages/core/src";
 import { HttpShardTransport, type CapabilityRequest } from "../packages/storage/src";
 import { DEFAULT_PIPELINE, type FileManifest } from "../packages/shared/src";
 import { encodeBase64Url } from "../packages/protocol/src";
@@ -22,6 +22,8 @@ describe("five real Go nodes through the HTTP control plane", () => {
   let originalHash = "";
   let manifest: FileManifest;
   let chunkedManifest: ChunkedManifest;
+  let chunkedHash = "";
+  const streamedBytes = Number(process.env.HORCRUX_LARGE_FILE_BYTES ?? (2 * 1024 * 1024 + 19));
 
   beforeAll(async () => {
     root = await mkdtemp(join(tmpdir(), "horcrux-five-node-"));
@@ -114,20 +116,22 @@ describe("five real Go nodes through the HTTP control plane", () => {
     expect(await sha256(restored)).toBe(originalHash);
 
     const chunkedFileId = crypto.randomUUID();
-    const chunkedInput = deterministicBytes(2 * 1024 * 1024 + 19);
-    const chunkedHash = await sha256(chunkedInput);
+    if (!Number.isSafeInteger(streamedBytes) || streamedBytes < 1) throw new Error("HORCRUX_LARGE_FILE_BYTES must be a positive safe integer");
+    chunkedHash = await hashGenerated(streamedBytes);
     const chunkedInitialized = await request<{ nodes: Array<{ id: string; endpoint: string }> }>("/files/init", {
       method: "POST",
-      body: JSON.stringify({ fileId: chunkedFileId, originalName: "chunked-cluster.bin", mimeType: "application/octet-stream", originalSize: chunkedInput.byteLength, plaintextHash: chunkedHash, dataShards: 3, parityShards: 2, keyShareThreshold: 3, keyShareCount: 5, storageMode: "http", formatVersion: 2 }),
+      body: JSON.stringify({ fileId: chunkedFileId, originalName: "chunked-cluster.bin", mimeType: "application/octet-stream", originalSize: streamedBytes, plaintextHash: chunkedHash, dataShards: 3, parityShards: 2, keyShareThreshold: 3, keyShareCount: 5, storageMode: "http", formatVersion: 2 }),
     });
     await request(`/files/${chunkedFileId}/state`, { method: "POST", body: JSON.stringify({ status: "distributing" }) });
     const chunkedPipeline = makeChunkedPipeline(new Map(chunkedInitialized.nodes.map((node) => [node.id, node.endpoint])));
-    chunkedManifest = await chunkedPipeline.upload({ fileId: chunkedFileId, name: "chunked-cluster.bin", mimeType: "application/octet-stream", size: chunkedInput.byteLength, source: sourceOf(chunkedInput), plaintextHash: chunkedHash }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, chunkedInitialized.nodes.map((node) => node.id));
+    const uploadStarted = performance.now();
+    chunkedManifest = await chunkedPipeline.upload({ fileId: chunkedFileId, name: "chunked-cluster.bin", mimeType: "application/octet-stream", size: streamedBytes, source: () => generatedSource(streamedBytes), plaintextHash: chunkedHash }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, chunkedInitialized.nodes.map((node) => node.id));
     await request(`/files/${chunkedFileId}/complete`, { method: "POST", body: JSON.stringify({ formatVersion: 2, chunkSize: chunkedManifest.chunkSize, chunkCount: chunkedManifest.chunkCount, noncePrefix: chunkedManifest.noncePrefix, objects: chunkedManifest.objects }) });
     const chunkedAuthorized = await request<ChunkedManifest>(`/files/${chunkedFileId}/download-manifest`);
-    const chunkedOutput: Uint8Array[] = [];
-    await makeChunkedPipeline(new Map(chunkedAuthorized.objects.map((object) => [object.nodeId, object.endpoint!]))) .downloadTo(chunkedAuthorized, (chunk) => { chunkedOutput.push(chunk.slice()); });
-    expect(joinBytes(chunkedOutput)).toEqual(chunkedInput);
+    const restoredHash = new Sha256Stream();
+    await makeChunkedPipeline(new Map(chunkedAuthorized.objects.map((object) => [object.nodeId, object.endpoint!]))) .downloadTo(chunkedAuthorized, (chunk) => { restoredHash.update(chunk); });
+    expect(restoredHash.hex()).toBe(chunkedHash);
+    console.log(`v2 stream: ${streamedBytes} bytes, ${chunkedManifest.chunkCount} frames, upload ${(performance.now() - uploadStarted).toFixed(0)}ms; bounded source/output buffers`);
   }, 120_000);
 
   test("reconstructs after two real node processes are terminated", async () => {
@@ -141,9 +145,9 @@ describe("five real Go nodes through the HTTP control plane", () => {
     expect(restored).toEqual(original);
     expect(await sha256(restored)).toBe(originalHash);
     const chunkedAuthorized = await request<ChunkedManifest>(`/files/${chunkedManifest.fileId}/download-manifest`);
-    const chunkedOutput: Uint8Array[] = [];
-    await makeChunkedPipeline(new Map(chunkedAuthorized.objects.map((object) => [object.nodeId, object.endpoint!]))) .downloadTo(chunkedAuthorized, (chunk) => { chunkedOutput.push(chunk.slice()); });
-    expect(await sha256(joinBytes(chunkedOutput))).toBe(await sha256(deterministicBytes(2 * 1024 * 1024 + 19)));
+    const restoredHash = new Sha256Stream();
+    await makeChunkedPipeline(new Map(chunkedAuthorized.objects.map((object) => [object.nodeId, object.endpoint!]))) .downloadTo(chunkedAuthorized, (chunk) => { restoredHash.update(chunk); });
+    expect(restoredHash.hex()).toBe(chunkedHash);
   }, 60_000);
 
   test("fails explicitly after a third real node process is terminated", async () => {
@@ -204,7 +208,8 @@ function verifyOpaqueNodeStorage(manifest: FileManifest, nodes: Node[], original
     }
   }
 }
-function sourceOf(bytes: Uint8Array) { return async function* () { for (let offset = 0; offset < bytes.byteLength; offset += 65_537) yield bytes.slice(offset, offset + 65_537); }; }
+async function hashGenerated(size: number) { const hash = new Sha256Stream(); for await (const chunk of generatedSource(size)) hash.update(chunk); return hash.hex(); }
+async function* generatedSource(size: number) { for (let offset = 0; offset < size; offset += 65_537) { const length = Math.min(65_537, size - offset); const chunk = new Uint8Array(length); for (let index = 0; index < length; index += 1) chunk[index] = ((offset + index) * 31 + (offset + index >>> 7)) & 0xff; yield chunk; } }
 function joinBytes(chunks: Uint8Array[]) { const total = chunks.reduce((size, chunk) => size + chunk.byteLength, 0); const output = new Uint8Array(total); let offset = 0; for (const chunk of chunks) { output.set(chunk, offset); offset += chunk.byteLength; } return output; }
 
 async function run(command: string[], cwd: string) {
