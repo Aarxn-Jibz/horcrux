@@ -7,7 +7,7 @@ export interface ShardTransport {
   deleteShard(nodeId: string, objectId: string): Promise<void>;
   healthCheck(nodeId: string): Promise<boolean>;
   /** Optional bounded-memory object operations used by the v2 striped format. */
-  putShardStream?(nodeId: string, objectId: string, bytes: ByteStream, options: PutShardOptions & { size: number }): Promise<StoredObjectRef>;
+  putShardStream?(nodeId: string, objectId: string, bytes: ByteStream, options: PutShardOptions & { maxSize: number }): Promise<StoredObjectRef>;
   getShardStream?(nodeId: string, objectId: string, signal?: AbortSignal): Promise<ByteStream>;
 }
 export * from "./indexed-db";

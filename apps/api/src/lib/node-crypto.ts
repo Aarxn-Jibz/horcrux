@@ -41,12 +41,13 @@ export async function issueCapability(capability: StorageCapability, privateKey?
 
 export function receiptMatchesCapability(
   receipt: StorageReceipt,
-  capability: Pick<StorageCapability, "jti" | "nodeId" | "objectId" | "operation" | "checksum" | "size">,
+  capability: Pick<StorageCapability, "jti" | "nodeId" | "objectId" | "operation" | "checksum" | "size" | "maxSize">,
 ) {
   return capability.operation === "PUT"
     && receipt.requestId === capability.jti
     && receipt.nodeId === capability.nodeId
     && receipt.objectId === capability.objectId
-    && receipt.checksum === capability.checksum
-    && receipt.size === capability.size;
+    && (capability.maxSize !== undefined
+      ? receipt.size <= capability.maxSize
+      : receipt.checksum === capability.checksum && receipt.size === capability.size);
 }

@@ -19,8 +19,8 @@ export interface ChunkedConfig { dataShards: number; parityShards: number; keySh
 /**
  * V2 uses independently compressed and AES-GCM authenticated 4 MiB frames.
  * A random 64-bit prefix plus an unsigned 32-bit frame counter forms each 96-bit nonce.
- * The source factory must be replayable: a preflight pass binds final object checksum/size
- * into PUT capabilities, then each remote object is generated without retaining the file.
+ * One source pass fans each encrypted stripe out to the nodes. PUT capabilities are
+ * bounded conservatively; final checksums and sizes come from node receipts.
  */
 export class ChunkedFilePipeline {
   constructor(private readonly compression: CompressionProvider, private readonly encryption: EncryptionProvider, private readonly erasure: ErasureCodingProvider, private readonly secrets: SecretSharingProvider, private readonly storage: ShardTransport) {}
@@ -31,16 +31,16 @@ export class ChunkedFilePipeline {
     const key = crypto.getRandomValues(new Uint8Array(32));
     const noncePrefix = crypto.getRandomValues(new Uint8Array(8));
     const plaintextHash = input.plaintextHash ?? await hashSource(input.source());
-    const plan = await this.preflight(input, config, key, noncePrefix);
     const shares = await this.secrets.splitSecret(key, config.keyShares, config.keyThreshold);
+    const streamKey = key.slice();
     key.fill(0);
     const objects: ObjectPlacement[] = [];
     try {
-      const fanout = new StripeFanout(this.stripes(input, config, plan.key, noncePrefix), config.dataShards + config.parityShards);
+      const fanout = new StripeFanout(this.stripes(input, config, streamKey, noncePrefix), config.dataShards + config.parityShards);
       const shardResults = await Promise.all(Array.from({ length: config.dataShards + config.parityShards }, async (_, index) => {
         const objectId = `${input.fileId}/shard/${crypto.randomUUID()}`;
-        const stored = await this.storage.putShardStream!(nodeIds[index]!, objectId, fanout.stream(index), { checksum: plan.shards[index]!.checksum, size: plan.shards[index]!.size });
-        return { id: crypto.randomUUID(), kind: "shard" as const, index, nodeId: nodeIds[index]!, objectId, size: stored.size, checksum: plan.shards[index]!.checksum, shardType: index < config.dataShards ? "data" as const : "parity" as const, status: "stored" as const };
+        const stored = await this.storage.putShardStream!(nodeIds[index]!, objectId, fanout.stream(index), { maxSize: shardMaximumSize(input.size, config.dataShards) });
+        return { id: crypto.randomUUID(), kind: "shard" as const, index, nodeId: nodeIds[index]!, objectId, size: stored.size, checksum: stored.checksum, shardType: index < config.dataShards ? "data" as const : "parity" as const, status: "stored" as const };
       }));
       objects.push(...shardResults);
       const shareResults = await Promise.all(shares.map(async (share, index) => {
@@ -52,8 +52,8 @@ export class ChunkedFilePipeline {
     } catch (error) {
       await Promise.all(objects.map((object) => this.storage.deleteShard(object.nodeId, object.objectId).catch(() => {})));
       throw error;
-    } finally { shares.forEach((share) => share.fill(0)); }
-    return { formatVersion: 2, fileId: input.fileId, originalName: input.name, mimeType: input.mimeType || "application/octet-stream", originalSize: input.size, plaintextHash, encryptionAlgorithm: "AES-256-GCM", compressionAlgorithm: "zstd", chunkSize: CHUNKED_PLAINTEXT_BYTES, chunkCount: plan.chunkCount, noncePrefix: bytesToBase64Url(noncePrefix), dataShards: config.dataShards, parityShards: config.parityShards, keyShareThreshold: config.keyThreshold, keyShareCount: config.keyShares, objects };
+    } finally { streamKey.fill(0); shares.forEach((share) => share.fill(0)); }
+    return { formatVersion: 2, fileId: input.fileId, originalName: input.name, mimeType: input.mimeType || "application/octet-stream", originalSize: input.size, plaintextHash, encryptionAlgorithm: "AES-256-GCM", compressionAlgorithm: "zstd", chunkSize: CHUNKED_PLAINTEXT_BYTES, chunkCount: Math.ceil(input.size / CHUNKED_PLAINTEXT_BYTES), noncePrefix: bytesToBase64Url(noncePrefix), dataShards: config.dataShards, parityShards: config.parityShards, keyShareThreshold: config.keyThreshold, keyShareCount: config.keyShares, objects };
   }
 
   /** Reconstructs v2 directly to a consumer; no complete plaintext or shard is accumulated. */
@@ -94,11 +94,6 @@ export class ChunkedFilePipeline {
     shares.forEach((share) => share.fill(0)); throw new Error(`Insufficient Shamir shares: need ${manifest.keyShareThreshold}`);
   }
 
-  private async preflight(input: ChunkedUploadInput, config: ChunkedConfig, key: Uint8Array, noncePrefix: Uint8Array) {
-    const hashes = Array.from({ length: config.dataShards + config.parityShards }, () => new Sha256Stream()); const sizes = Array(hashes.length).fill(0); let chunkCount = 0;
-    for await (const stripe of this.stripes(input, config, key, noncePrefix)) { chunkCount += 1; stripe.forEach((piece, index) => { hashes[index]!.update(piece); sizes[index] += piece.byteLength; }); }
-    return { key: key.slice(), chunkCount, shards: hashes.map((hash, index) => ({ checksum: hash.hex(), size: sizes[index]! })) };
-  }
 
   private async *stripes(input: ChunkedUploadInput, config: ChunkedConfig, key: Uint8Array, noncePrefix: Uint8Array): AsyncGenerator<Uint8Array[]> {
     let index = 0;
@@ -155,6 +150,14 @@ async function encryptFrame(_encryption: EncryptionProvider, key: Uint8Array, pr
 function nonceFor(prefix: Uint8Array, index: number) { const nonce = new Uint8Array(12); nonce.set(prefix); new DataView(nonce.buffer).setUint32(8, index); return nonce; }
 function frameAad(fileId: string, originalSize: number, index: number, originalLength: number) { return encoder.encode(`${CHUNKED_FORMAT_VERSION}:${fileId}:${originalSize}:${index}:${originalLength}`); }
 function recordHeader(index: number, originalLength: number, encryptedLength: number, shardSize: number) { const bytes = new Uint8Array(RECORD_HEADER_BYTES); bytes.set([0x48, 0x52, 0x53, 0x32]); const view = new DataView(bytes.buffer); view.setUint32(4, index); view.setUint32(8, originalLength); view.setUint32(12, encryptedLength); view.setUint32(16, shardSize); return bytes; }
+
+// zstd's incompressible expansion is bounded per input frame. This deliberately
+// grants each node only its largest possible RS piece, never an unbounded file.
+function shardMaximumSize(sourceSize: number, dataShards: number) {
+  const frames = Math.ceil(sourceSize / CHUNKED_PLAINTEXT_BYTES);
+  const compressedBound = sourceSize + Math.ceil(sourceSize / 256) + frames * 512;
+  return Math.max(1, Math.ceil((compressedBound + frames * 16) / dataShards) + frames * RECORD_HEADER_BYTES);
+}
 
 async function hashSource(source: ByteStream) { const hash = new Sha256Stream(); for await (const chunk of source) hash.update(chunk); return hash.hex(); }
 async function* fixedChunks(source: ByteStream, size: number): AsyncGenerator<Uint8Array> { let pending = new Uint8Array(0); for await (const incoming of source) { let bytes = pending.byteLength ? concatBytes([pending, incoming]) : incoming; let offset = 0; while (offset + size <= bytes.byteLength) { yield bytes.slice(offset, offset + size); offset += size; } pending = bytes.slice(offset); if (bytes !== incoming) bytes.fill(0); } if (pending.byteLength || size === 0) yield pending; }

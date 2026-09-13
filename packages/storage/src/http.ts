@@ -8,6 +8,7 @@ export interface CapabilityRequest {
   operation: CapabilityOperation;
   checksum?: string;
   size?: number;
+  maxSize?: number;
 }
 export interface HttpShardTransportOptions {
   resolveEndpoint(nodeId: string): string | Promise<string>;
@@ -94,10 +95,9 @@ export class HttpShardTransport implements ShardTransport {
     return new Uint8Array(await response.arrayBuffer());
   }
 
-  async putShardStream(nodeId: string, objectId: string, bytes: ByteStream, options: PutShardOptions & { size: number }): Promise<StoredObjectRef> {
-    if (!options.checksum) throw new Error("HTTP shard uploads require the precomputed object checksum");
+  async putShardStream(nodeId: string, objectId: string, bytes: ByteStream, options: PutShardOptions & { maxSize: number }): Promise<StoredObjectRef> {
     const fileId = getFileId(objectId);
-    const capability = await this.options.requestCapability({ nodeId, fileId, objectId, operation: "PUT", checksum: options.checksum, size: options.size });
+    const capability = await this.options.requestCapability({ nodeId, fileId, objectId, operation: "PUT", maxSize: options.maxSize });
     const streamInit = {
       method: "PUT",
       headers: { Authorization: `Bearer ${capability}`, "Content-Type": "application/octet-stream" },
@@ -108,7 +108,7 @@ export class HttpShardTransport implements ShardTransport {
     } as RequestInit & { duplex: "half" };
     const response = await this.nodeRequest(nodeId, objectId, streamInit);
     const stored = await response.json() as PutResponse;
-    if (stored.nodeId !== nodeId || stored.objectId !== objectId || stored.checksum !== options.checksum || stored.size !== options.size || !stored.receipt) throw new Error("Storage node returned an inconsistent receipt response");
+    if (stored.nodeId !== nodeId || stored.objectId !== objectId || stored.size > options.maxSize || !stored.receipt) throw new Error("Storage node returned an inconsistent receipt response");
     await this.options.submitReceipt({ nodeId, fileId, receipt: stored.receipt });
     return { nodeId, objectId, size: stored.size, checksum: stored.checksum };
   }
