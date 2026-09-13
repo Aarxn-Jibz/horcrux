@@ -14,10 +14,15 @@ type Manager struct {
 	mu     sync.Mutex
 	peers  map[string]*webrtc.PeerConnection
 	config webrtc.Configuration
+	api    *webrtc.API
 }
 
 func NewManager(servers []webrtc.ICEServer) *Manager {
-	return &Manager{peers: map[string]*webrtc.PeerConnection{}, config: webrtc.Configuration{ICEServers: servers}}
+	engine := webrtc.SettingEngine{}
+	// Loopback candidates are intentionally enabled for direct local/LAN
+	// development. Production NAT traversal still relies on configured ICE.
+	engine.SetIncludeLoopbackCandidate(true)
+	return &Manager{peers: map[string]*webrtc.PeerConnection{}, config: webrtc.Configuration{ICEServers: servers}, api: webrtc.NewAPI(webrtc.WithSettingEngine(engine))}
 }
 
 func (m *Manager) AcceptOffer(ctx context.Context, sessionID, encoded string, onChannel func(*webrtc.DataChannel)) (string, error) {
@@ -27,7 +32,7 @@ func (m *Manager) AcceptOffer(ctx context.Context, sessionID, encoded string, on
 		return "", fmt.Errorf("session already has a peer")
 	}
 	m.mu.Unlock()
-	connection, err := webrtc.NewPeerConnection(m.config)
+	connection, err := m.api.NewPeerConnection(m.config)
 	if err != nil {
 		return "", err
 	}
