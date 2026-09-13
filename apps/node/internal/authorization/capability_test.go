@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -77,7 +78,12 @@ func TestRejectsWrongNodeObjectAndOperation(t *testing.T) {
 func TestRejectsTamperedSignature(t *testing.T) {
 	verifier, privateKey, now := testVerifier(t)
 	token := signed(t, validCapability(now), privateKey)
-	token = token[:len(token)-1] + "A"
+	parts := strings.Split(token, ".")
+	replacement := "A"
+	if strings.HasPrefix(parts[1], replacement) {
+		replacement = "B"
+	}
+	token = parts[0] + "." + replacement + parts[1][1:]
 	if _, err := verifier.Verify(token, "PUT", "file/shard/object"); !errors.Is(err, ErrInvalidCapability) {
 		t.Fatalf("expected signature rejection, got %v", err)
 	}
