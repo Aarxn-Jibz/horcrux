@@ -27,6 +27,14 @@ describe("v2 chunked file format", () => {
     expect(new Sha256Stream().update(join(output)).hex()).toBe(new Sha256Stream().update(input).hex());
   }, 120_000);
 
+  test("replaces a selected shard after it truncates mid-download", async () => {
+    const storage = new TruncatingTransport(nodes, "a"); const input = generated(5 * CHUNKED_PLAINTEXT_BYTES + 19); const instance = pipeline(storage);
+    const manifest = await instance.upload({ fileId: crypto.randomUUID(), name: "midstream.bin", mimeType: "application/octet-stream", size: input.byteLength, source: source(input) }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes);
+    const output: Uint8Array[] = []; await instance.downloadTo(manifest, (chunk) => { output.push(chunk.slice()); });
+    expect(storage.resumed).toBeTrue();
+    expect(new Sha256Stream().update(join(output)).hex()).toBe(new Sha256Stream().update(input).hex());
+  }, 120_000);
+
   test("fails below three physical nodes", async () => {
     const storage = new MemoryShardTransport(nodes); const input = generated(CHUNKED_PLAINTEXT_BYTES + 7); const instance = pipeline(storage);
     const manifest = await instance.upload({ fileId: crypto.randomUUID(), name: "failure.bin", mimeType: "application/octet-stream", size: input.byteLength, source: source(input) }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes);
@@ -45,3 +53,19 @@ describe("v2 chunked file format", () => {
 
 function generated(size: number) { const bytes = new Uint8Array(size); for (let index = 0; index < size; index += 1) bytes[index] = (index * 17 + index >>> 8) & 0xff; return bytes; }
 function join(chunks: Uint8Array[]) { const size = chunks.reduce((total, chunk) => total + chunk.byteLength, 0); const bytes = new Uint8Array(size); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; } return bytes; }
+
+class TruncatingTransport extends MemoryShardTransport {
+  resumed = false;
+  constructor(nodes: readonly string[], private readonly failNode: string) { super(nodes); }
+  override async getShardStream(nodeId: string, objectId: string, signal?: AbortSignal, start = 0) {
+    const stream = await super.getShardStream(nodeId, objectId, signal, start);
+    if (nodeId !== this.failNode || start > 0) { if (start > 0) this.resumed = true; return stream; }
+    return (async function* () {
+      for await (const bytes of stream) {
+        const firstRecord = 20 + new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(16);
+        yield bytes.slice(0, firstRecord);
+        throw new Error("simulated selected shard connection loss");
+      }
+    })();
+  }
+}
