@@ -89,7 +89,7 @@ The advertised URL is signed into every heartbeat and persisted by D1. It is the
 
 ## Physical-node LAN test
 
-Laptop A hosts the API and web app. Generate a development TLS certificate trusted by every browser that will connect to a node (for example, `mkcert 192.168.1.42` on each node; do not commit certificates or keys). Configure `WEB_ORIGIN=http://192.168.1.10:5173` in `apps/api/.dev.vars`, run `bun run db:migrate:local`, then start `bun run dev:api` and `VITE_HORCRUX_STORAGE_MODE=http bun --cwd apps/web dev --host 0.0.0.0`.
+Laptop A hosts the API and web app. Generate a development TLS certificate trusted by every browser that will connect to a node (for example, `mkcert 192.168.1.42` on each node; do not commit certificates or keys). Configure `WEB_ORIGIN=http://192.168.1.10:5173` in `apps/api/.dev.vars`, run `bun run db:migrate:local`, then start `bun --cwd apps/api dev --ip 0.0.0.0` and `VITE_HORCRUX_STORAGE_MODE=http bun --cwd apps/web dev --host 0.0.0.0`.
 
 Register and sign in through the browser on Laptop A. With its access JWT, create an enrollment challenge:
 
