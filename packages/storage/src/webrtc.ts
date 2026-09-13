@@ -1,19 +1,93 @@
 import type { ByteStream, PutShardOptions, ShardTransport, StoredObjectRef } from "./index";
 
 type Connect = (nodeId: string) => Promise<RTCDataChannel>;
-type Grant = (request:{nodeId:string;fileId:string;objectId:string;operation:"PUT"|"GET"|"DELETE";maxSize?:number})=>Promise<string>;
+type Grant = (request: { nodeId: string; fileId: string; objectId: string; operation: "PUT" | "GET" | "DELETE"; maxSize?: number }) => Promise<string>;
+type Control = { type: string; objectId?: string; size?: number; checksum?: string; capability?: string; message?: string };
+
 const CHUNK = 64 * 1024;
+const TIMEOUT = 30_000;
+
+/** A bounded, ordered DataChannel implementation of the shard transport. */
 export class WebRtcShardTransport implements ShardTransport {
- constructor(private readonly connect: Connect, private readonly grant: Grant) {}
- async putShard(nodeId:string, objectId:string, bytes:Uint8Array, options:PutShardOptions={}):Promise<StoredObjectRef>{ return this.putShardStream(nodeId,objectId,(async function*(){yield bytes})(),{...options,maxSize:bytes.byteLength}); }
- async putShardStream(nodeId:string, objectId:string, stream:ByteStream, options:PutShardOptions & {maxSize:number}):Promise<StoredObjectRef>{const channel=await this.connect(nodeId); await control(channel,{type:"put-init",objectId,capability:await this.grant({nodeId,fileId:fileId(objectId),objectId,operation:"PUT",maxSize:options.maxSize})});for await(const input of stream){for(let offset=0;offset<input.byteLength;offset+=CHUNK){await drain(channel);channel.send(input.slice(offset,offset+CHUNK));}}channel.send(JSON.stringify({type:"put-finish"}));const receipt=await waitControl(channel,"receipt");return {nodeId,objectId,size:receipt.size,checksum:receipt.checksum};}
- async getShard(nodeId:string, objectId:string, signal?:AbortSignal){const chunks:Uint8Array[]=[];for await(const chunk of await this.getShardStream(nodeId,objectId,signal))chunks.push(chunk);const size=chunks.reduce((n,c)=>n+c.byteLength,0),out=new Uint8Array(size);let at=0;for(const c of chunks){out.set(c,at);at+=c.byteLength;}return out;}
- async getShardStream(nodeId:string, objectId:string, _signal?:AbortSignal, start=0){const channel=await this.connect(nodeId);channel.send(JSON.stringify({type:"get",objectId,size:start,capability:await this.grant({nodeId,fileId:fileId(objectId),objectId,operation:"GET"})}));return incoming(channel);}
- async deleteShard(nodeId:string,objectId:string){const channel=await this.connect(nodeId);channel.send(JSON.stringify({type:"delete",objectId,capability:await this.grant({nodeId,fileId:fileId(objectId),objectId,operation:"DELETE"})}));await waitControl(channel,"delete-finish");}
- async healthCheck(nodeId:string){try{const channel=await this.connect(nodeId);channel.close();return true;}catch{return false;}}
+  constructor(private readonly connect: Connect, private readonly grant: Grant) {}
+
+  async putShard(nodeId: string, objectId: string, bytes: Uint8Array, options: PutShardOptions = {}): Promise<StoredObjectRef> {
+    return this.putShardStream(nodeId, objectId, (async function* () { yield bytes; })(), { ...options, maxSize: bytes.byteLength });
+  }
+
+  async putShardStream(nodeId: string, objectId: string, stream: ByteStream, options: PutShardOptions & { maxSize: number }): Promise<StoredObjectRef> {
+    const channel = await this.connect(nodeId);
+    const receipt = waitForControl(channel, "receipt");
+    await sendControl(channel, { type: "put-init", objectId, capability: await this.grant({ nodeId, fileId: fileId(objectId), objectId, operation: "PUT", maxSize: options.maxSize }) });
+    try {
+      for await (const input of stream) for (let offset = 0; offset < input.byteLength; offset += CHUNK) { await drain(channel); channel.send(input.slice(offset, offset + CHUNK)); }
+      await sendControl(channel, { type: "put-finish" });
+      const result = await receipt;
+      return { nodeId, objectId, size: requiredNumber(result.size, "receipt size"), checksum: requiredString(result.checksum, "receipt checksum") };
+    } finally { channel.close(); }
+  }
+
+  async getShard(nodeId: string, objectId: string, signal?: AbortSignal) {
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of await this.getShardStream(nodeId, objectId, signal)) chunks.push(chunk);
+    const output = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0)); let offset = 0;
+    for (const chunk of chunks) { output.set(chunk, offset); offset += chunk.byteLength; }
+    return output;
+  }
+
+  async getShardStream(nodeId: string, objectId: string, signal?: AbortSignal, start = 0): Promise<ByteStream> {
+    const channel = await this.connect(nodeId);
+    const stream = incoming(channel, signal);
+    await sendControl(channel, { type: "get", objectId, size: start, capability: await this.grant({ nodeId, fileId: fileId(objectId), objectId, operation: "GET" }) });
+    return stream;
+  }
+
+  async deleteShard(nodeId: string, objectId: string) {
+    const channel = await this.connect(nodeId); const complete = waitForControl(channel, "delete-finish");
+    try { await sendControl(channel, { type: "delete", objectId, capability: await this.grant({ nodeId, fileId: fileId(objectId), objectId, operation: "DELETE" }) }); await complete; } finally { channel.close(); }
+  }
+  async healthCheck(nodeId: string) { try { const channel = await this.connect(nodeId); channel.close(); return true; } catch { return false; } }
 }
-async function control(channel:RTCDataChannel,message:unknown){channel.send(JSON.stringify(message));}
-function drain(channel:RTCDataChannel){if(channel.bufferedAmount<CHUNK*4)return Promise.resolve();channel.bufferedAmountLowThreshold=CHUNK*2;return new Promise<void>((resolve)=>{channel.addEventListener("bufferedamountlow",()=>resolve(),{once:true});});}
-function waitControl(channel:RTCDataChannel,type:string){return new Promise<any>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error("WebRTC operation timed out")),30_000);channel.addEventListener("message",(event)=>{if(typeof event.data!=="string")return;const message=JSON.parse(event.data);if(message.type===type){clearTimeout(timer);resolve(message);}},{once:false});});}
-async function* incoming(channel:RTCDataChannel){const queue:Uint8Array[]=[];let done=false,error:unknown;channel.addEventListener("message",(event)=>{if(typeof event.data==="string"){const control=JSON.parse(event.data);if(control.type==="get-finish")done=true;}else queue.push(new Uint8Array(event.data));});channel.addEventListener("error",()=>{error=new Error("WebRTC channel error");});while(!done||queue.length){if(error)throw error;const next=queue.shift();if(next)yield next;else await new Promise((resolve)=>setTimeout(resolve,1));}}
-function fileId(objectId:string){const slash=objectId.indexOf("/");if(slash<1)throw new Error("Object ID does not contain a file scope");return objectId.slice(0,slash);}
+
+async function sendControl(channel: RTCDataChannel, message: Control) { await drain(channel); channel.send(JSON.stringify(message)); }
+function drain(channel: RTCDataChannel) {
+  if (channel.readyState !== "open") return Promise.reject(new Error("WebRTC data channel is not open"));
+  if (channel.bufferedAmount < CHUNK * 4) return Promise.resolve();
+  channel.bufferedAmountLowThreshold = CHUNK * 2;
+  return new Promise<void>((resolve, reject) => { const timer = setTimeout(() => reject(new Error("WebRTC data channel remained backpressured")), TIMEOUT); channel.addEventListener("bufferedamountlow", () => { clearTimeout(timer); resolve(); }, { once: true }); });
+}
+function waitForControl(channel: RTCDataChannel, expected: string) {
+  return new Promise<Control>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout>;
+    const closed = () => finish(() => reject(new Error("WebRTC data channel closed")));
+    const message = (event: MessageEvent) => {
+      if (typeof event.data !== "string") return;
+      let control: Control; try { control = JSON.parse(event.data) as Control; } catch { finish(() => reject(new Error("Malformed WebRTC control response"))); return; }
+      if (control.type === "error") finish(() => reject(new Error(control.message ?? "WebRTC operation rejected")));
+      else if (control.type === expected) finish(() => resolve(control));
+    };
+    const finish = (callback: () => void) => { clearTimeout(timer); channel.removeEventListener("message", message); channel.removeEventListener("close", closed); callback(); };
+    timer = setTimeout(() => finish(() => reject(new Error(`WebRTC ${expected} timed out`))), TIMEOUT);
+    channel.addEventListener("message", message); channel.addEventListener("close", closed, { once: true });
+  });
+}
+function incoming(channel: RTCDataChannel, signal?: AbortSignal): ByteStream {
+  const queue: Uint8Array[] = []; let done = false; let error: unknown; let wake: (() => void) | undefined;
+  const notify = () => { const next = wake; wake = undefined; next?.(); };
+  const message = (event: MessageEvent) => {
+    if (typeof event.data === "string") { try { const control = JSON.parse(event.data) as Control; if (control.type === "error") error = new Error(control.message ?? "WebRTC operation rejected"); if (control.type === "get-finish") done = true; } catch { error = new Error("Malformed WebRTC control response"); } }
+    else { const data = new Uint8Array(event.data as ArrayBuffer); if (data.byteLength === 0 || data.byteLength > CHUNK) error = new Error("Invalid WebRTC binary chunk"); else queue.push(data); }
+    notify();
+  };
+  const close = () => { if (!done) error = new Error("WebRTC data channel closed"); notify(); };
+  channel.addEventListener("message", message); channel.addEventListener("close", close, { once: true });
+  return {
+    async *[Symbol.asyncIterator]() {
+      try { while (!done || queue.length) { if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError"); if (error) throw error; const chunk = queue.shift(); if (chunk) yield chunk; else await new Promise<void>((resolve) => { wake = resolve; signal?.addEventListener("abort", () => resolve(), { once: true }); }); } }
+      finally { channel.removeEventListener("message", message); channel.removeEventListener("close", close); channel.close(); }
+    },
+  };
+}
+function requiredString(value: unknown, label: string) { if (typeof value !== "string" || !value) throw new Error(`Missing ${label}`); return value; }
+function requiredNumber(value: unknown, label: string) { if (typeof value !== "number" || value < 0) throw new Error(`Missing ${label}`); return value; }
+function fileId(objectId: string) { const slash = objectId.indexOf("/"); if (slash < 1) throw new Error("Object ID does not contain a file scope"); return objectId.slice(0, slash); }
