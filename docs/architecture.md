@@ -24,7 +24,7 @@ deleteShard(nodeId, objectId)
 healthCheck(nodeId)
 ```
 
-IndexedDB and memory transports support deterministic browser development and tests. `HttpShardTransport` implements direct authenticated REST transfer, requires HTTPS away from loopback, requests an object-scoped grant for each operation, and submits PUT receipts to Hono. A future WebRTC transport fits the same boundary without rewriting compression, encryption, distribution, or reconstruction.
+IndexedDB and memory transports support deterministic browser development and tests. `HttpShardTransport` implements direct authenticated REST transfer, requires HTTPS away from loopback, requests an object-scoped grant for each operation, and submits PUT receipts to Hono. `WebRtcShardTransport` uses the same grants and receipts over an authenticated data channel, with the Worker relaying signaling records only.
 
 ## Upload sequence
 
@@ -88,7 +88,7 @@ STUN helps endpoints discover public-facing NAT mappings and ICE candidates. It 
 
 TURN is required when carrier-grade NAT, symmetric NAT, strict hotspots, or firewalls defeat direct paths. Both endpoints connect outward and TURN relays already-encrypted object bytes. TURN can observe network metadata, timing, and byte counts, so it is not zero-knowledge with respect to metadata. It must never receive plaintext files or key material, and relay bandwidth has real infrastructure cost.
 
-Implemented now: direct local/LAN HTTPS semantics, outbound heartbeats, endpoint-independent transports, grants, receipts, and tests. Not implemented now: signaling service, WebRTC data channels, ICE candidate exchange, STUN configuration, TURN credentials/deployment, automatic endpoint discovery, or global relay infrastructure.
+Implemented now: direct local/LAN HTTPS semantics, outbound heartbeats, endpoint-independent HTTP and WebRTC transports, Worker-relayed signaling, grants, receipts, and tests. Not implemented now: STUN configuration, TURN credentials/deployment, automatic endpoint discovery, or global relay infrastructure.
 
 ## Parallelism and instrumentation
 
@@ -104,7 +104,6 @@ Peak memory still includes the browser file read, active codec/ciphertext buffer
 
 ## Future work
 
-- production WebRTC signaling and data-channel transport;
 - STUN configuration and a measured TURN fallback deployment;
 - OS keystore integration and an optional tray UI around the headless daemon;
 - replica repair, rebalancing, distributed garbage collection, and deletion acknowledgements;
