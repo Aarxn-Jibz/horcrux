@@ -12,6 +12,8 @@ type Node = { endpoint: string; directory: string; process: Process; id?: string
 type Session = { accessToken: string };
 
 const CHROMIUM = process.env.HORCRUX_CHROMIUM ?? "/home/aaron/.cloakbrowser/chromium-146.0.7680.177.5/chrome";
+const GO_CACHE = join(process.cwd(), ".integration-cache", "go-build");
+const GO_MODULE_CACHE = join(process.cwd(), ".integration-cache", "go-mod");
 let buildTempRoot = "";
 
 describe("Chromium browser and Pion node WebRTC data plane", () => {
@@ -24,14 +26,27 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
   let nodes: Node[] = [];
   let session: Session;
 
+  const cleanup = async () => {
+    await browser?.close().catch(() => undefined);
+    for (const node of nodes) node.process.kill();
+    await Promise.all(nodes.map((node) => node.process.exited.catch(() => 0)));
+    web?.stop(true);
+    api?.kill();
+    if (api) await api.exited.catch(() => 0);
+    if (root) await rm(root, { recursive: true, force: true });
+    root = "";
+    buildTempRoot = "";
+  };
+
   beforeAll(async () => {
+    try {
     console.log("webrtc e2e: starting control plane");
     // Chromium and cgo link steps can exceed the constrained /tmp filesystem.
     // Keep this disposable cluster under the repository's roomy workspace and
     // remove it in afterAll.
     root = await mkdtemp(join(process.cwd(), ".tmp-webrtc-"));
     buildTempRoot = root;
-    await mkdir(join(root, "go-tmp"));
+    await Promise.all([mkdir(join(root, "go-tmp")), mkdir(GO_CACHE, { recursive: true }), mkdir(GO_MODULE_CACHE, { recursive: true })]);
     const [apiPort, webPort] = await Promise.all([reservePort(), reservePort()]);
     apiUrl = `http://127.0.0.1:${apiPort}`;
     webUrl = `http://127.0.0.1:${webPort}`;
@@ -41,7 +56,9 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
     const environmentFile = join(root, "api.env");
     await Bun.write(environmentFile, `JWT_SECRET=webrtc-test-${crypto.randomUUID()}\nWEB_ORIGIN=${webUrl}\nCAPABILITY_PRIVATE_KEY=${privateKey}\nCAPABILITY_PUBLIC_KEY=${publicKey}\n`);
     const persistence = join(root, "d1");
+    console.log("webrtc e2e: migrating local D1");
     await run(["./node_modules/.bin/wrangler", "d1", "migrations", "apply", "horcrux-file-system", "--local", "--persist-to", persistence], "apps/api");
+    console.log("webrtc e2e: local D1 migrated");
     api = Bun.spawn(["./node_modules/.bin/wrangler", "dev", "--local", "--ip", "127.0.0.1", "--port", String(apiPort), "--persist-to", persistence, "--env-file", environmentFile, "--log-level", "error"], { cwd: "apps/api", stdout: "pipe", stderr: "pipe" });
     await waitFor(() => fetch(`${apiUrl}/health`).then((response) => response.ok).catch(() => false), "control plane");
     console.log("webrtc e2e: starting browser origin");
@@ -57,13 +74,13 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
     session = await request<Session>("/auth/register", { method: "POST", body: JSON.stringify({ email: `webrtc-${crypto.randomUUID()}@example.com`, password: "browser-webrtc-correct-horse" }) }, false);
 
     const binary = join(root, "horcrux-node");
-    await run(["go", "build", "-ldflags=-s -w", "-o", binary, "./cmd/horcrux-node"], "apps/node");
+    await run(["go", "build", "-modcacherw", "-ldflags=-s -w", "-o", binary, "./cmd/horcrux-node"], "apps/node");
     console.log("webrtc e2e: starting node processes");
     const ports = await Promise.all([reservePort(), reservePort()]);
     nodes = await Promise.all(ports.map(async (port, index) => {
       const challenge = await request<{ challengeId: string; token: string }>("/devices/enrollment-challenges", { method: "POST" });
       const directory = join(root, `node-${index + 1}`);
-      const child = Bun.spawn([binary, "--data-dir", directory, "--listen", `127.0.0.1:${port}`, "--advertise-url", `http://127.0.0.1:${port}`, "--control-plane-public-key", publicKey, "--control-plane-url", apiUrl, "--enrollment-challenge", challenge.challengeId, "--node-name", `webrtc-node-${index + 1}`, "--web-origin", webUrl], { env: { ...process.env, HORCRUX_ENROLLMENT_TOKEN: challenge.token, GOCACHE: "/tmp/horcrux-go-cache", GOMODCACHE: "/tmp/horcrux-go-mod" }, stdout: "pipe", stderr: "pipe" });
+      const child = Bun.spawn([binary, "--data-dir", directory, "--listen", `127.0.0.1:${port}`, "--advertise-url", `http://127.0.0.1:${port}`, "--control-plane-public-key", publicKey, "--control-plane-url", apiUrl, "--enrollment-challenge", challenge.challengeId, "--node-name", `webrtc-node-${index + 1}`, "--web-origin", webUrl], { env: { ...process.env, HORCRUX_ENROLLMENT_TOKEN: challenge.token, HORCRUX_WEBRTC_DEBUG: "1" }, stdout: "inherit", stderr: "inherit" });
       const endpoint = `http://127.0.0.1:${port}`;
       await waitFor(() => fetch(`${endpoint}/health`).then((response) => response.ok).catch(() => false), `node ${index + 1}`);
       console.log(`webrtc e2e: node ${index + 1} listening`);
@@ -79,15 +96,14 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
     // Pion is not a browser mDNS resolver; expose loopback host candidates for
     // this direct local integration path rather than relying on a TURN relay.
     browser = await chromium.launch({ executablePath: CHROMIUM, headless: true, args: ["--no-sandbox", "--disable-features=WebRtcHideLocalIpsWithMdns"] });
+    } catch (error) {
+      await cleanup();
+      throw error;
+    }
   }, 120_000);
 
   afterAll(async () => {
-    await browser?.close();
-    for (const node of nodes) node.process.kill();
-    await Promise.all(nodes.map((node) => node.process.exited.catch(() => 0)));
-    web?.stop();
-    api?.kill(); if (api) await api.exited.catch(() => 0);
-    if (root) await rm(root, { recursive: true, force: true });
+    await cleanup();
   });
 
   test("streams a multi-chunk opaque object over a real browser DataChannel and reads it back", async () => {
@@ -114,27 +130,41 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
         return response.json() as Promise<T>;
       };
       const peers: RTCPeerConnection[] = [];
+      const waitForChannelOpen = (channel: RTCDataChannel, nodeId: string) => new Promise<void>((resolve, reject) => {
+        const finish = (callback: () => void) => { clearTimeout(timer); channel.removeEventListener("open", open); channel.removeEventListener("error", fail); channel.removeEventListener("close", fail); callback(); };
+        const open = () => { console.log(`channel open ${nodeId}`); finish(resolve); };
+        const fail = () => finish(() => reject(new Error(`DataChannel failed to open for ${nodeId}`)));
+        const timer = setTimeout(() => finish(() => reject(new Error(`DataChannel open timed out for ${nodeId}`))), 30_000);
+        channel.addEventListener("open", open, { once: true }); channel.addEventListener("error", fail, { once: true }); channel.addEventListener("close", fail, { once: true });
+      });
       const connect = async (nodeId: string) => {
         console.log(`creating signaling session for ${nodeId}`);
         const session = await request<{ sessionId: string }>("/webrtc/sessions", { nodeId });
         const peer = new RTCPeerConnection({ iceServers: [] }); peers.push(peer);
         const channel = peer.createDataChannel("horcrux", { ordered: true }); channel.binaryType = "arraybuffer";
+        peer.onicegatheringstatechange = () => console.log(`ICE gathering ${nodeId}: ${peer.iceGatheringState}`);
+        peer.oniceconnectionstatechange = () => console.log(`ICE connection ${nodeId}: ${peer.iceConnectionState}`);
+        peer.onconnectionstatechange = () => console.log(`peer connection ${nodeId}: ${peer.connectionState}`);
+        peer.onicecandidate = ({ candidate }) => console.log(`local ICE candidate ${nodeId}: ${candidate?.candidate ?? "end-of-candidates"}`);
+        channel.onclosing = () => console.log(`channel closing ${nodeId}`);
+        channel.onclose = () => console.log(`channel closed ${nodeId}`);
+        const opened = waitForChannelOpen(channel, nodeId);
         const offer = await peer.createOffer(); await peer.setLocalDescription(offer);
         if (peer.iceGatheringState !== "complete") await new Promise<void>((resolve) => peer.addEventListener("icegatheringstatechange", () => { if (peer.iceGatheringState === "complete") resolve(); }, { once: false }));
+        console.log(`offer SDP ${nodeId}: ${peer.localDescription!.sdp}`);
         await request(`/webrtc/sessions/${session.sessionId}/signals`, { nodeId, type: "offer", payload: peer.localDescription!.sdp });
         console.log(`offer posted for ${nodeId}`);
         const deadline = Date.now() + 30_000;
         while (!peer.currentRemoteDescription && Date.now() < deadline) {
           const signals = await request<{ signals: Array<{ type: "answer" | "ice-candidate"; payload: string }> }>(`/webrtc/sessions/${session.sessionId}/signals`, undefined, "GET");
           for (const signal of signals.signals) {
-            if (signal.type === "answer" && !peer.currentRemoteDescription) { console.log(`answer received for ${nodeId}`); await peer.setRemoteDescription({ type: "answer", sdp: signal.payload }); }
-            else if (signal.type === "ice-candidate") await peer.addIceCandidate(JSON.parse(signal.payload));
+            if (signal.type === "answer" && !peer.currentRemoteDescription) { console.log(`answer SDP ${nodeId}: ${signal.payload}`); await peer.setRemoteDescription({ type: "answer", sdp: signal.payload }); }
+            else if (signal.type === "ice-candidate") { console.log(`remote ICE candidate ${nodeId}: ${signal.payload}`); await peer.addIceCandidate(JSON.parse(signal.payload)); }
           }
           if (!peer.currentRemoteDescription) await new Promise((resolve) => setTimeout(resolve, 100));
         }
         if (!peer.currentRemoteDescription) throw new Error("Pion answer timed out");
-        await new Promise<void>((resolve, reject) => { const timer = setTimeout(() => reject(new Error("DataChannel open timed out")), 30_000); channel.onopen = () => { clearTimeout(timer); resolve(); }; channel.onerror = () => { clearTimeout(timer); reject(new Error("DataChannel error")); }; });
-        console.log(`channel open for ${nodeId}`);
+        await opened;
         return channel;
       };
       const receipts: string[] = [];
@@ -170,10 +200,12 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
       const request = async <T>(path: string, body?: unknown, method = "POST") => { const response = await fetch(`${apiUrl}${path}`, { method, headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) }, body: body === undefined ? undefined : JSON.stringify(body) }); if (!response.ok) throw new Error(`${path}: ${response.status}`); return response.json() as Promise<T>; };
       const connect = async (target: string) => {
         const session = await request<{ sessionId: string }>("/webrtc/sessions", { nodeId: target }); const peer = new RTCPeerConnection(); const channel = peer.createDataChannel("horcrux", { ordered: true }); channel.binaryType = "arraybuffer";
+        peer.onicegatheringstatechange = () => console.log(`ICE gathering ${target}: ${peer.iceGatheringState}`); peer.oniceconnectionstatechange = () => console.log(`ICE connection ${target}: ${peer.iceConnectionState}`); peer.onconnectionstatechange = () => console.log(`peer connection ${target}: ${peer.connectionState}`); peer.onicecandidate = ({ candidate }) => console.log(`local ICE candidate ${target}: ${candidate?.candidate ?? "end-of-candidates"}`);
+        const opened = new Promise<void>((resolve, reject) => { const finish = (callback: () => void) => { clearTimeout(timer); channel.removeEventListener("open", open); channel.removeEventListener("error", fail); channel.removeEventListener("close", fail); callback(); }; const open = () => { console.log(`channel open ${target}`); finish(resolve); }; const fail = () => finish(() => reject(new Error(`DataChannel failed to open for ${target}`))); const timer = setTimeout(() => finish(() => reject(new Error(`DataChannel open timed out for ${target}`))), 30_000); channel.addEventListener("open", open, { once: true }); channel.addEventListener("error", fail, { once: true }); channel.addEventListener("close", fail, { once: true }); });
         await peer.setLocalDescription(await peer.createOffer()); if (peer.iceGatheringState !== "complete") await new Promise<void>((resolve) => peer.addEventListener("icegatheringstatechange", () => peer.iceGatheringState === "complete" && resolve()));
-        await request(`/webrtc/sessions/${session.sessionId}/signals`, { nodeId: target, type: "offer", payload: peer.localDescription!.sdp }); const until = Date.now() + 30_000;
-        while (!peer.currentRemoteDescription && Date.now() < until) { const signals = await request<{ signals: Array<{ type: "answer"; payload: string }> }>(`/webrtc/sessions/${session.sessionId}/signals`, undefined, "GET"); for (const signal of signals.signals) if (!peer.currentRemoteDescription) await peer.setRemoteDescription({ type: "answer", sdp: signal.payload }); if (!peer.currentRemoteDescription) await new Promise((resolve) => setTimeout(resolve, 100)); }
-        if (!peer.currentRemoteDescription) throw new Error("answer timed out"); await new Promise<void>((resolve, reject) => { const timer = setTimeout(() => reject(new Error("open timed out")), 30_000); channel.onopen = () => { clearTimeout(timer); resolve(); }; channel.onerror = () => reject(new Error("channel error")); }); return channel;
+        console.log(`offer SDP ${target}: ${peer.localDescription!.sdp}`); await request(`/webrtc/sessions/${session.sessionId}/signals`, { nodeId: target, type: "offer", payload: peer.localDescription!.sdp }); const until = Date.now() + 30_000;
+        while (!peer.currentRemoteDescription && Date.now() < until) { const signals = await request<{ signals: Array<{ type: "answer" | "ice-candidate"; payload: string }> }>(`/webrtc/sessions/${session.sessionId}/signals`, undefined, "GET"); for (const signal of signals.signals) { if (signal.type === "answer" && !peer.currentRemoteDescription) { console.log(`answer SDP ${target}: ${signal.payload}`); await peer.setRemoteDescription({ type: "answer", sdp: signal.payload }); } else if (signal.type === "ice-candidate") { console.log(`remote ICE candidate ${target}: ${signal.payload}`); await peer.addIceCandidate(JSON.parse(signal.payload)); } } if (!peer.currentRemoteDescription) await new Promise((resolve) => setTimeout(resolve, 100)); }
+        if (!peer.currentRemoteDescription) throw new Error("answer timed out"); await opened; return channel;
       };
       const transport = new WebRtcShardTransport(connect, async (input: { nodeId: string; fileId: string; objectId: string; operation: "PUT" | "GET" | "DELETE" }) => (await request<{ capability: string }>(`/nodes/${input.nodeId}/capabilities`, input)).capability);
       const bytes = await transport.getShard(nodeId, objectId);
@@ -195,6 +227,6 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
 
 function deterministicBytes(size: number) { const bytes = new Uint8Array(size); for (let index = 0; index < size; index += 1) bytes[index] = (index * 31 + (index >>> 7)) & 0xff; return bytes; }
 async function hash(bytes: Uint8Array) { return createHash("sha256").update(bytes).digest("hex"); }
-async function run(command: string[], cwd: string) { const temp = join(buildTempRoot, "go-tmp"); const child = Bun.spawn(command, { cwd, env: { ...process.env, GOCACHE: "/tmp/horcrux-go-cache", GOMODCACHE: "/tmp/horcrux-go-mod", GOTMPDIR: temp, TMPDIR: temp }, stdout: "pipe", stderr: "pipe" }); if (await child.exited !== 0) throw new Error(`${command.join(" ")} failed: ${await new Response(child.stderr).text()}`); }
+async function run(command: string[], cwd: string) { const temp = join(buildTempRoot, "go-tmp"); const child = Bun.spawn(command, { cwd, env: { ...process.env, CI: "1", GOCACHE: GO_CACHE, GOMODCACHE: GO_MODULE_CACHE, GOTMPDIR: temp, TMPDIR: temp }, stdin: "ignore", stdout: "pipe", stderr: "pipe" }); if ((await child.exited) !== 0) throw new Error(`${command.join(" ")} failed: ${await new Response(child.stderr).text()}`); }
 async function reservePort() { const server = createServer(); await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); }); const address = server.address(); if (!address || typeof address === "string") throw new Error("Could not reserve port"); await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); return address.port; }
 async function waitFor(check: () => boolean | Promise<boolean>, label: string, timeout = 30_000) { const deadline = Date.now() + timeout; while (Date.now() < deadline) { if (await check()) return; await Bun.sleep(100); } throw new Error(`Timed out waiting for ${label}`); }

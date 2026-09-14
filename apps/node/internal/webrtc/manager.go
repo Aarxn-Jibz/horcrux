@@ -3,6 +3,8 @@ package webrtc
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -26,6 +28,7 @@ func NewManager(servers []webrtc.ICEServer) *Manager {
 }
 
 func (m *Manager) AcceptOffer(ctx context.Context, sessionID, encoded string, onChannel func(*webrtc.DataChannel)) (string, error) {
+	debug := os.Getenv("HORCRUX_WEBRTC_DEBUG") == "1"
 	m.mu.Lock()
 	if _, exists := m.peers[sessionID]; exists {
 		m.mu.Unlock()
@@ -37,15 +40,42 @@ func (m *Manager) AcceptOffer(ctx context.Context, sessionID, encoded string, on
 		return "", err
 	}
 	connection.OnDataChannel(func(channel *webrtc.DataChannel) {
+		if debug {
+			slog.Info("webrtc data channel", "session", sessionID, "label", channel.Label())
+			channel.OnOpen(func() { slog.Info("webrtc data channel open", "session", sessionID, "label", channel.Label()) })
+		}
 		if channel.Label() == "horcrux" {
 			onChannel(channel)
 		}
 	})
+	if debug {
+		connection.OnICEGatheringStateChange(func(state webrtc.ICEGathererState) {
+			slog.Info("webrtc ICE gathering", "session", sessionID, "state", state.String())
+		})
+		connection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+			slog.Info("webrtc ICE connection", "session", sessionID, "state", state.String())
+		})
+	}
 	connection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		if debug {
+			slog.Info("webrtc peer connection", "session", sessionID, "state", state.String())
+		}
 		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
 			m.Close(sessionID)
 		}
 	})
+	if debug {
+		connection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+			if candidate == nil {
+				slog.Info("webrtc local ICE candidates complete", "session", sessionID)
+				return
+			}
+			slog.Info("webrtc local ICE candidate", "session", sessionID, "candidate", candidate.String())
+		})
+		connection.SCTP().Transport().ICETransport().OnSelectedCandidatePairChange(func(pair *webrtc.ICECandidatePair) {
+			slog.Info("webrtc selected ICE candidate pair", "session", sessionID, "local", pair.Local.String(), "remote", pair.Remote.String())
+		})
+	}
 	if err := connection.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: encoded}); err != nil {
 		connection.Close()
 		return "", err

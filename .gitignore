@@ -8,3 +8,4 @@ coverage/
 /apps/node/data/
 /apps/node/horcrux-node
 .tmp-webrtc-*/
+.integration-cache/
