@@ -1,84 +1,160 @@
 # Horcrux File System
 
-Horcrux is a client-encrypted distributed file store. The browser secures and reconstructs files, the Hono Worker coordinates identity and metadata, and a headless Go daemon stores opaque objects on laptops. The Worker is the control plane; it is not the shard-data relay.
+> **Client-Encrypted, Zero-Knowledge Distributed File Store**
 
-The control plane never receives plaintext file contents, plaintext or reconstructed AES keys, Shamir share bodies, or encrypted shard bodies.
+Horcrux is a high-security distributed file system inspired by secret-sharing cryptography. The browser client compresses, encrypts, erasure-codes, and secret-splits files locally before distributing opaque chunks to a mesh of laptop/edge storage nodes. A Cloudflare Worker coordinates identity, placement metadata, capability grants, and storage receipts without ever receiving file contents or encryption keys.
 
-## Repository
+---
 
-```text
-apps/
-  web/       React + Vite browser application
-  api/       Hono Cloudflare Worker and D1 migrations
-  node/      Go laptop storage daemon
-packages/
-  core/      browser crypto, compression, erasure, secret sharing, pipeline, scheduler
-  protocol/  versioned JSON contracts and Ed25519 envelopes
-  shared/    IDs, validation, metadata, errors, constants
-  storage/   ShardTransport with IndexedDB, memory, and HTTP implementations
-integration/ local browser/control-plane signer/Go node path
-```
+## Key Highlights
 
-`packages/core` preserves the working crypto/erasure/secret boundaries rather than creating path churn solely to match conceptual package names. Go remains in its own module and is not forced into Bun tooling.
+- **Zero-Knowledge Control Plane**: The Worker never receives plaintext files, AES keys, Shamir share bodies, or encrypted shard bodies.
+- **Client-Side Cryptography**: 
+  - File compression via **zstd (level 3)**
+  - Authenticated encryption via **AES-256-GCM**
+  - Fault-tolerant erasure coding via **Reed-Solomon (3 data + 2 parity)**
+  - Key splitting via **Shamir's Secret Sharing (3-of-5 threshold)**
+- **Framed v2 Streaming**: Streams files in **1 MiB frames**, eliminating memory caps for large files using the native **File System Access API**.
+- **Cryptographic Grants & Receipts**: Edge storage node PUT/GET/DELETE operations require short-lived Ed25519 capabilities; uploads are confirmed via signed node storage receipts.
 
-## Data protection pipeline
+---
 
-Uploads remain:
+## Architecture Dataflow
 
 ```text
-file → zstd level 3 → AES-256-GCM → Reed–Solomon 3 data + 2 parity → five shards
-AES key → Shamir Secret Sharing 3-of-5 → five shares
+                        +------------------------------------+
+                        |      Hono / Cloudflare Worker      |
+                        |      (Control Plane + D1 DB)       |
+                        +------------------------------------+
+                           /           |            \
+            Auth & Manifests  Capability Grants   Heartbeats & Receipts
+                         /             |              \
+                        v              v               v
+  +----------------------------+             +----------------------------+
+  |       Browser Client       |  HTTP REST  |   Go Edge Storage Daemon   |
+  |   (React + Core Crypto)    |<----------->|    (Opaque Object Store)   |
+  +----------------------------+             +----------------------------+
 ```
 
-The browser distributes the ten opaque objects through `ShardTransport` with at most four active expensive operations. Downloads interleave shard and share candidates through four runners and stop once three valid RS shards and three valid shares are available. Every object checksum, reconstructed ciphertext hash, AES-GCM authentication tag, original size, and original SHA-256 hash is verified.
+---
 
-## File formats
+## Repository Structure
 
-Existing files are format v1 and retain the whole-file zstd/AES-GCM layout. New HTTP-mode uploads use format v2: the browser reads `File.stream()` in 1 MiB frames, compresses each frame independently with zstd level 3, authenticates it with AES-256-GCM, RS-encodes that frame into a stripe, and streams the five shard objects directly to nodes. V2 stores its format version, frame size/count, and random nonce prefix in D1 metadata; it never stores keys or frame bodies there.
+| Path | Tech Stack | Role & Description |
+| :--- | :--- | :--- |
+| [`apps/web`](apps/web) | React, Vite, Three.js | Browser application for file management UI, device enrollment, and progressive 3D visualization. |
+| [`apps/api`](apps/api) | Hono, Cloudflare D1 | Serverless control plane API handling user auth, node heartbeats, placement manifests, and capability issuance. |
+| [`apps/node`](apps/node) | Go 1.24, SQLite | Headless storage daemon managing opaque object storage with atomic disk writes and Ed25519 signatures. |
+| [`packages/core`](packages/core) | TypeScript | Core cryptographic pipeline: zstd, AES-256-GCM, Reed-Solomon 3+2, Shamir 3-of-5, and stream schedulers. |
+| [`packages/protocol`](packages/protocol) | TypeScript | Versioned JSON schemas and Ed25519 capability/receipt envelope specifications. |
+| [`packages/storage`](packages/storage) | TypeScript | `ShardTransport` abstraction (IndexedDB/Memory for dev/test, REST HTTP for real nodes). |
+| [`packages/shared`](packages/shared) | TypeScript | Shared constants, validation rules, UUID generators, and custom error types. |
+| [`integration`](integration) | TypeScript | Integration tests and 5-node local cluster automated acceptance test harness. |
 
-Each v2 file has one random AES key, Shamir-split once as before. A random 64-bit per-file nonce prefix plus the unsigned 32-bit frame index forms each 96-bit AES-GCM nonce; counter overflow is rejected. AAD binds format version, file UUID, original size, frame index, and frame plaintext length. Frame-local compression trades some compression ratio for bounded memory and independent recovery.
+> [!NOTE]
+> `packages/core` preserves cryptographic boundaries without artificial churn. Go daemon code lives in its own module (`apps/node`) and is built independently of Node/Bun tooling.
 
-V2 streamed PUT capabilities bind a positive maximum object size, not browser-declared final metadata. The browser generates each stripe once and fans it out to five bounded PUT bodies. The node enforces the reservation while streaming to a temporary file, computes actual SHA-256 and byte count, fsyncs and atomically commits it, then signs those actual values in its receipt. Hono verifies that the attested result fits the issued bound before committing placement metadata.
+---
 
-Core v2 reconstruction writes verified frames to a `FileSink` without retaining the file. The web app uses the native File System Access API where available. Blob fallback is capped at 100 MiB and clearly rejects larger downloads on unsupported browsers.
+## Data Protection Pipeline
 
-See [the architecture guide](docs/architecture.md) and [security model](docs/security.md) for trust boundaries, memory behavior, and the direct/STUN/TURN roadmap.
+```text
+Upload Pipeline:
+file ──> zstd (level 3) ──> AES-256-GCM ──> Reed-Solomon (3 data + 2 parity) ──> 5 Encrypted Shards
+                                │
+AES Key ────────────────────────┴─────────> Shamir Secret Sharing (3-of-5)  ──> 5 Key Shares
+```
 
-## Local development
+- **Upload Orchestration**: The browser distributes the **10 opaque objects** (5 shards + 5 key shares) across 5 distinct storage nodes with a max concurrency cap of **4 active operations**.
+- **Download Reconstruction**: Downloads query reconstruction manifests and interleave shard/share retrieval across 4 parallel runners. Reconstruction succeeds as soon as **any 3 valid shards and 3 valid shares** arrive. Every object checksum, AES tag, original size, and SHA-256 hash is strictly verified.
 
-Requirements: Bun, Go 1.24+, a C compiler for `go-sqlite3`, and a recent browser.
+---
 
+## File Formats (v1 vs v2)
+
+- **Format v1**: Whole-file in-memory processing. Retains whole-file zstd/AES-GCM layout (capped at 256 MiB).
+- **Format v2 (Streaming)**:
+  - Reads `File.stream()` in **1 MiB frames**.
+  - Compresses each frame with zstd level 3 and encrypts via AES-256-GCM using a 64-bit random per-file nonce prefix + 32-bit frame counter.
+  - AAD binds format version, file UUID, original size, frame index, and frame length.
+  - Nodes enforce capability-bound stream size reservations; browser writes verified frames incrementally to a `FileSink` (native File System Access API, with 100 MiB Blob fallback).
+
+---
+
+## API Overview
+
+All browser-facing routes require a short-lived access JWT (`Bearer <token>`). Node enrollment uses a single-use token; heartbeats and receipts are authenticated by node Ed25519 signatures.
+
+| Method | Endpoint | Auth Required | Description |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/auth/register` | Public | Register a new user account |
+| `POST` | `/auth/login` | Public | Authenticate user and receive access/refresh JWTs |
+| `POST` | `/auth/refresh` | Refresh JWT | Refresh short-lived access token |
+| `POST` | `/auth/logout` | Access JWT | Invalidate active session |
+| `GET` | `/auth/me` | Access JWT | Retrieve authenticated user profile |
+| `GET` | `/devices` | Access JWT | List enrolled laptop/edge storage nodes |
+| `POST` | `/devices/enrollment-challenges` | Access JWT | Create a 10-minute one-time node enrollment token |
+| `POST` | `/nodes/enroll` | Node Signature | Enroll node using single-use challenge token |
+| `POST` | `/nodes/:id/heartbeat` | Node Signature | Periodic node health ping (capacity, version, state) |
+| `POST` | `/nodes/:id/capabilities` | Access JWT | Issue short-lived PUT/GET/DELETE capabilities |
+| `POST` | `/nodes/:id/receipts` | Access JWT | Submit signed storage node receipt to finalize upload |
+| `POST` | `/files/init` | Access JWT | Initialize file metadata & fetch eligible placements |
+| `GET` | `/files` | Access JWT | List owned files |
+| `GET` | `/files/:id` | Access JWT | Fetch file metadata |
+| `GET` | `/files/:id/download-manifest` | Access JWT | Fetch reconstruction manifest & GET grants |
+| `POST` | `/files/:id/complete` | Access JWT | Mark file upload completed after receipt verification |
+| `DELETE` | `/files/:id` | Access JWT | Delete file and issue DELETE capabilities to nodes |
+
+---
+
+## Local Development Setup
+
+### Prerequisites
+- **Bun** (v1.0+)
+- **Go** (v1.24+)
+- **C Compiler** (GCC / Clang for `go-sqlite3`)
+- Modern Web Browser (Chrome / Edge / Firefox)
+
+### 1. Initial Setup
 ```bash
 bun install
 bun run keys:generate
 cp apps/api/.dev.vars.example apps/api/.dev.vars
 ```
 
-Put the generated development keys and a strong `JWT_SECRET` in the ignored `apps/api/.dev.vars`, then initialize D1:
+Add the generated development keys and a strong `JWT_SECRET` into `apps/api/.dev.vars`.
 
+### 2. Apply Local Database Migrations
 ```bash
 bun run db:migrate:local
 ```
 
-Run web and API in separate terminals:
-
+### 3. Run Development Servers
+Open two terminal windows:
 ```bash
+# Terminal 1: Control Plane Worker API (http://localhost:8787)
 bun run dev:api
+
+# Terminal 2: Browser Web App (http://localhost:5173)
 bun run dev:web
 ```
 
-The browser defaults to `http://localhost:8787` for the Worker and IndexedDB mock storage. Set `VITE_HORCRUX_STORAGE_MODE=http` before starting Vite to use enrolled Go nodes instead. HTTP mode deliberately requires five healthy, distinct physical node identities with fresh heartbeats; it never falls back to mock storage.
+> [!TIP]
+> The browser defaults to IndexedDB mock storage. To test real enrolled Go nodes, launch Vite with:
+> `VITE_HORCRUX_STORAGE_MODE=http bun run dev:web`
 
-## Laptop node
+---
 
-Build and test the headless daemon independently:
+## Edge Laptop Node Setup
 
+### Build and Test Daemon
 ```bash
 bun run build:node
 bun run test:node
 ```
 
-Create an enrollment challenge while signed into the web API, then run the node once with that challenge. Prefer the environment variable so the one-time secret does not appear in process arguments:
+### Node Enrollment & Execution
+Create an enrollment challenge via the Web API, then run the daemon:
 
 ```bash
 export HORCRUX_ENROLLMENT_TOKEN='<one-time token>'
@@ -95,71 +171,48 @@ export HORCRUX_ENROLLMENT_TOKEN='<one-time token>'
   --data-dir './node-data'
 ```
 
-The advertised URL is signed into every heartbeat and persisted by D1. It is the URL the browser receives in placement and reconstruction manifests; `--listen` and `--advertise-url` are intentionally separate. Plain HTTP listeners and advertised URLs are restricted to loopback. Configure `--tls-cert` and `--tls-key` for any LAN node, plus the exact allowed browser `--web-origin`. See the physical test procedure below and [the node guide](apps/node/README.md).
+---
 
-## Physical-node LAN test
+## Verification & Test Suite
 
-Laptop A hosts the API and web app. Generate a development TLS certificate trusted by every browser that will connect to a node (for example, `mkcert 192.168.1.42` on each node; do not commit certificates or keys). Configure `WEB_ORIGIN=http://192.168.1.10:5173` in `apps/api/.dev.vars`, run `bun run db:migrate:local`, then start `bun --cwd apps/api dev --ip 0.0.0.0` and `VITE_HORCRUX_STORAGE_MODE=http bun --cwd apps/web dev --host 0.0.0.0`.
-
-Register and sign in through the browser on Laptop A. With its access JWT, create an enrollment challenge:
+Run the full test suite across all monorepo components:
 
 ```bash
-curl -X POST http://192.168.1.10:8787/devices/enrollment-challenges \
-  -H 'Authorization: Bearer <ACCESS_JWT>'
-```
-
-On Laptop B, use the returned `challengeId` and `token` to start the node as in the preceding command, substituting Laptop A's control-plane URL, Laptop A's Vite origin, and Laptop B's LAN address. Check the Devices screen after a heartbeat (normally within 30 seconds): it must show Online and the advertised endpoint. Repeat this on five independently powered laptops (or five separately configured test machines) before uploading in HTTP mode.
-
-Upload and download through the normal Files UI. Node data directories contain only opaque encrypted objects and `metadata.sqlite`; compare the downloaded file with `sha256sum original downloaded`. Five processes on one laptop can exercise placement and recovery mechanics using five ports/data directories, but are not independent failure domains and must not be described as physical fault tolerance.
-
-## Verification
-
-```bash
+# Unit & Type Checks
 bun test
 bun run typecheck
+
+# Build Checks
 bun run build:web
 bun run build:api
-bun run test:node
 bun run build:node
+
+# Node & E2E Integration Tests
+bun run test:node
 bun run test:e2e
+
+# Real 5-Node Local Loopback Test
 bun run test:five-node
+
+# 1 GiB Streaming Test (Opt-in)
 bun run test:large-file
 ```
 
-The integration test starts a real Go daemon on loopback and verifies a TS-issued grant, opaque upload, signed receipt, byte-identical download, authorization rejection, and delete. It needs permission to bind a local port.
+---
 
-`bun run test:five-node` is the local HTTP acceptance test. It starts an ephemeral Wrangler/D1 control plane, applies every migration, enrolls five independently identified Go node processes on dynamically allocated loopback ports, uploads through the browser-compatible core pipeline and `HttpShardTransport`, verifies two opaque objects per node, reconstructs with all nodes, terminates two processes and reconstructs again, then verifies a clear failure after a third process stops. It needs permission to bind local ports and does not persist secrets or node data.
+## Cloudflare Production Deployment
 
-`bun run test:large-file` runs that same real-node v2 path using a deterministic 1 GiB generated source. It hashes generated and restored bytes incrementally, does not allocate a 1 GiB source/output buffer, and is intentionally opt-in.
+1. Create a production D1 database and add its ID to `apps/api/wrangler.jsonc`.
+2. Apply D1 migrations remotely: `bun --cwd apps/api wrangler d1 migrations apply horcrux-db --remote`.
+3. Set secrets: `wrangler secret put JWT_SECRET` and `wrangler secret put CAPABILITY_PRIVATE_KEY`.
+4. Set environment variables `CAPABILITY_PUBLIC_KEY` and `WEB_ORIGIN`.
+5. Deploy Worker (`bun run build:api`) and host the web application bundle (`apps/web/dist`).
 
-## Public site
+---
 
-`/` is a public landing page. It remains available to signed-in users, whose navigation exposes **Open Horcrux**. The landing illustration is progressively enhanced with a lazy Three.js 5 → 3 reconstruction sequence; static content remains available for reduced motion and WebGL failure.
+## Architecture & Security Docs
 
-## Cloudflare deployment
+For deeper technical details, refer to:
+- [Architecture Guide](docs/architecture.md) — Trust boundaries, scheduling, memory model, and WebRTC/STUN/TURN roadmap.
+- [Security Model](docs/security.md) — Node identity, cryptographic capabilities, storage receipts, and threat analysis.
 
-1. Create D1 and set its production ID in `apps/api/wrangler.jsonc`.
-2. Apply both migrations remotely.
-3. Store `JWT_SECRET` and `CAPABILITY_PRIVATE_KEY` with `wrangler secret put`; never commit them or place production values in Wrangler vars.
-4. Configure `CAPABILITY_PUBLIC_KEY` and `WEB_ORIGIN` for the Worker environment.
-5. Deploy the Worker and build the web app with its `VITE_API_URL`.
-
-Review cookie `SameSite`, CORS, CSRF, node certificate distribution, and allowed origins before a public deployment.
-
-## API overview
-
-```text
-POST   /auth/register | /auth/login | /auth/refresh | /auth/logout
-GET    /auth/me
-GET    /devices
-POST   /devices/enrollment-challenges
-POST   /nodes/enroll
-POST   /nodes/:id/heartbeat
-POST   /nodes/:id/capabilities
-POST   /nodes/:id/receipts
-POST   /files/init | /files/:id/state | /files/:id/complete
-GET    /files | /files/:id | /files/:id/download-manifest
-DELETE /files/:id
-```
-
-Browser-facing routes require the short-lived access JWT. Node enrollment consumes a one-time challenge. Heartbeats and receipts are authenticated by the node’s Ed25519 signature.
