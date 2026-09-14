@@ -1,32 +1,26 @@
 import { useEffect, useRef } from "react";
 
-/** Progressive-enhancement WebGL explanation of the 3-of-5 recovery model. */
 export function FragmentHero() {
   const mount = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const host = mount.current;
     if (!host || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    let disposed = false;
-    let cleanup = () => {};
-    void import("three").then((THREE) => {
-      if (disposed || !host) return;
-      const scene = new THREE.Scene();
-      const camera = new THREE.PerspectiveCamera(42, 1, .1, 100); camera.position.z = 8;
-      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); host.append(renderer.domElement);
-      const material = new THREE.MeshStandardMaterial({ color: 0x29362b, roughness: .48, metalness: .24 });
-      const geometry = new THREE.IcosahedronGeometry(1.38, 1); const pieces = Array.from({ length: 5 }, () => {
-        const mesh = new THREE.Mesh(geometry, material.clone()); scene.add(mesh); return mesh;
-      });
-      scene.add(new THREE.AmbientLight(0xf8edcf, 2.2)); const light = new THREE.DirectionalLight(0xd4a35f, 3); light.position.set(3, 4, 5); scene.add(light);
-      const resize = () => { const { width, height } = host.getBoundingClientRect(); renderer.setSize(width, height, false); camera.aspect = width / height; camera.updateProjectionMatrix(); };
-      const targets = [[0, 1.8, 0], [1.7, .55, .1], [1.05, -1.4, 0], [-1.1, -1.4, 0], [-1.7, .55, .1]];
-      let pointerX = 0, pointerY = 0, active = true, frame = 0;
-      const move = (event: PointerEvent) => { const rect = host.getBoundingClientRect(); pointerX = (event.clientX - rect.left) / rect.width - .5; pointerY = (event.clientY - rect.top) / rect.height - .5; };
-      const observer = new IntersectionObserver(([entry]) => { active = Boolean(entry?.isIntersecting); }); observer.observe(host); addEventListener("pointermove", move, { passive: true }); addEventListener("resize", resize); resize();
-      const render = () => { if (!disposed) frame = requestAnimationFrame(render); if (!active) return; const scroll = Math.min(1, Math.max(0, (innerHeight - host.getBoundingClientRect().top) / (innerHeight + host.clientHeight))); const phase = Math.min(1, scroll * 1.45); pieces.forEach((mesh, index) => { const [x, y, z] = targets[index]!; const vanish = (index === 1 || index === 3) ? Math.max(0, Math.min(1, (phase - .42) / .22)) : 0; const reform = Math.max(0, Math.min(1, (phase - .68) / .32)); const spread = phase < .72 ? phase / .72 : 1 - reform; mesh.position.set(x! * spread, y! * spread, z! * spread); mesh.scale.setScalar((1 - vanish) * (1 - .12 * spread)); mesh.rotation.set(phase * (index + 1) * .45 + pointerY * .18, phase * (index - 2) * .5 + pointerX * .2, 0); mesh.visible = vanish < .98; }); scene.rotation.y = pointerX * .25; scene.rotation.x = -pointerY * .15; renderer.render(scene, camera); };
-      render(); cleanup = () => { cancelAnimationFrame(frame); observer.disconnect(); removeEventListener("pointermove", move); removeEventListener("resize", resize); geometry.dispose(); pieces.forEach((mesh) => mesh.material.dispose()); renderer.dispose(); renderer.domElement.remove(); };
+    let dead = false; let frame = 0;
+    void import("three").then((T) => {
+      if (dead || !host) return;
+      const scene = new T.Scene(); const camera = new T.PerspectiveCamera(36, 1, .1, 100); camera.position.z = 8;
+      const renderer = new T.WebGLRenderer({ antialias: true, alpha: true }); renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); host.append(renderer.domElement);
+      const shape = new T.Shape(); for (let i = 0; i < 10; i += 1) { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 1.2 : 2; i ? shape.lineTo(Math.cos(a) * r, Math.sin(a) * r) : shape.moveTo(Math.cos(a) * r, Math.sin(a) * r); } shape.closePath();
+      const geometry = new T.ExtrudeGeometry(shape, { depth: .35, bevelEnabled: true, bevelSize: .04, bevelThickness: .04 }); geometry.center();
+      const group = new T.Group(); scene.add(group); const pieces = Array.from({ length: 5 }, (_, i) => { const mesh = new T.Mesh(geometry, new T.MeshStandardMaterial({ color: 0xc9fa52, emissive: 0x263d10, emissiveIntensity: .5, roughness: .3, metalness: .65 })); mesh.rotation.z = i * Math.PI * 2 / 5; group.add(mesh); return mesh; });
+      scene.add(new T.AmbientLight(0x638c40, 1.8)); const light = new T.PointLight(0xe6ff80, 35, 15); light.position.set(2, 3, 4); scene.add(light);
+      const points = [[0,1.8],[1.75,.45],[1.08,-1.58],[-1.08,-1.58],[-1.75,.45]]; let active = true;
+      const observer = new IntersectionObserver(([entry]) => { active = Boolean(entry?.isIntersecting); }); observer.observe(host);
+      const resize = () => { const { width, height } = host.getBoundingClientRect(); renderer.setSize(width, height, false); camera.aspect = width / height; camera.updateProjectionMatrix(); }; addEventListener("resize", resize); resize();
+      const render = () => { if (!dead) frame = requestAnimationFrame(render); if (!active) return; const phase = (performance.now() / 10000) % 1, spread = Math.min(1, phase / .3, (1 - phase) / .24), reform = Math.max(0, (phase - .72) / .28); pieces.forEach((mesh, i) => { const [x, y] = points[i]!; const vanish = i === 1 || i === 3 ? Math.max(0, Math.min(1, (phase - .36) / .18)) : 0; mesh.position.set(x! * spread * (1 - reform), y! * spread * (1 - reform), -vanish); mesh.scale.setScalar(1 - vanish); mesh.visible = vanish < .98; }); group.rotation.y = phase * Math.PI * 2; renderer.render(scene, camera); }; render();
+      (host as HTMLElement & { dispose?: () => void }).dispose = () => { cancelAnimationFrame(frame); observer.disconnect(); removeEventListener("resize", resize); geometry.dispose(); pieces.forEach((piece) => (piece.material as { dispose(): void }).dispose()); renderer.dispose(); renderer.domElement.remove(); };
     }).catch(() => { host.dataset.webgl = "unavailable"; });
-    return () => { disposed = true; cleanup(); };
+    return () => { dead = true; (host as HTMLElement & { dispose?: () => void }).dispose?.(); };
   }, []);
   return <div ref={mount} className="fragment-webgl" aria-hidden="true" />;
 }
