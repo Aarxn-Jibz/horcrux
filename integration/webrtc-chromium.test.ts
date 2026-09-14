@@ -74,7 +74,7 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
     session = await request<Session>("/auth/register", { method: "POST", body: JSON.stringify({ email: `webrtc-${crypto.randomUUID()}@example.com`, password: "browser-webrtc-correct-horse" }) }, false);
 
     const binary = join(root, "horcrux-node");
-    await run(["go", "build", "-modcacherw", "-ldflags=-s -w", "-o", binary, "./cmd/horcrux-node"], "apps/node");
+    await run(["go", "build", "-modcacherw", "-ldflags", "-s -w", "-o", binary, "./cmd/horcrux-node"], "apps/node");
     console.log("webrtc e2e: starting node processes");
     const ports = await Promise.all([reservePort(), reservePort()]);
     nodes = await Promise.all(ports.map(async (port, index) => {

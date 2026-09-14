@@ -49,7 +49,7 @@ func (m *Manager) AcceptOffer(ctx context.Context, sessionID, encoded string, on
 		}
 	})
 	if debug {
-		connection.OnICEGatheringStateChange(func(state webrtc.ICEGathererState) {
+		connection.OnICEGatheringStateChange(func(state webrtc.ICEGatheringState) {
 			slog.Info("webrtc ICE gathering", "session", sessionID, "state", state.String())
 		})
 		connection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
