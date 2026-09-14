@@ -15,6 +15,7 @@
     "test:js": "bun test",
     "test:node": "cd apps/node && go test ./...",
     "test:five-node": "bun test integration/five-node-http-cluster.test.ts",
+    "test:webrtc": "bun test integration/webrtc-chromium.test.ts",
     "test:large-file": "HORCRUX_LARGE_FILE_BYTES=1073741824 bun test integration/five-node-http-cluster.test.ts",
     "test:e2e": "bun run scripts/e2e-local.ts",
     "keys:generate": "bun run scripts/generate-capability-keys.ts",
