@@ -7,6 +7,7 @@ import (
 	"github.com/horcrux-file-system/horcrux/apps/node/internal/storage"
 	"github.com/pion/webrtc/v4"
 	"log/slog"
+	"os"
 	"time"
 )
 
@@ -90,7 +91,11 @@ func (s *Service) poll(ctx context.Context) {
 				channel.OnClose(session.Abort)
 			})
 			if err == nil {
-				_, _ = s.Signals.Exchange(ctx, id, &Signal{Type: "answer", Payload: answer})
+				if _, exchangeErr := s.Signals.Exchange(ctx, id, &Signal{Type: "answer", Payload: answer}); exchangeErr != nil {
+					slog.Debug("webrtc answer relay rejected", "error", exchangeErr)
+				} else if os.Getenv("HORCRUX_WEBRTC_DEBUG") == "1" {
+					slog.Info("webrtc answer relayed", "session", id)
+				}
 			} else {
 				slog.Debug("webrtc offer rejected", "error", err)
 			}
