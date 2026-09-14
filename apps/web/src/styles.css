@@ -238,3 +238,6 @@ header { display: flex; height: 56px; align-items: center; justify-content: spac
   .upload-popover { position: fixed; top: 64px; right: var(--space-4); left: var(--space-4); width: auto; }
   .development-notice { align-items: flex-start; flex-direction: column; gap: var(--space-1); }
 }
+
+.hero-copy { min-width: 0; }
+@media (max-width: 760px) { .landing h1 { font-size: clamp(2.65rem, 12vw, 4rem); } .hero-lede { max-width: 100%; font-size: 1rem; } .hero-proof { font-size: .55rem; } }
