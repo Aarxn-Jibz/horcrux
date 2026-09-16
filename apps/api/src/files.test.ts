@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { fileCommitSchema, fileInitSchema } from "@horcrux-file-system/shared";
+import app from "./index";
 import { getOwnedFile, serializeFile, type FileRow } from "./data/files";
+import type { Env } from "./env";
+import { issueAccessToken } from "./lib/tokens";
 
 const row: FileRow = { id: "file-1", owner_user_id: "owner-1", original_name: "hello.txt", mime_type: "text/plain", original_size: 5, compressed_size: null, encrypted_size: null, plaintext_hash: "a".repeat(64), ciphertext_hash: null, status: "uploading", encryption_algorithm: "AES-256-GCM", compression_algorithm: "zstd", encryption_iv: null, rs_data_shards: 3, rs_parity_shards: 2, rs_shard_size: null, key_share_threshold: 3, key_share_count: 5, created_at: "2026-01-01" };
 function database(result: FileRow | null) { return { prepare: () => ({ bind: (...params: unknown[]) => ({ first: async () => params[1] === result?.owner_user_id ? result : null }) }) } as unknown as D1Database; }
@@ -17,5 +20,59 @@ describe("file metadata and ownership", () => {
     expect((await getOwnedFile(database(row), row.id, "owner-1")).id).toBe(row.id);
     await expect(getOwnedFile(database(row), row.id, "attacker")).rejects.toMatchObject({ status: 404, code: "file_not_found" });
     expect(serializeFile(row)).not.toHaveProperty("owner_user_id");
+  });
+});
+
+class CompletionRaceDatabase {
+  file = { ...row, id: "file-race", owner_user_id: "user-a", rs_data_shards: 1, rs_parity_shards: 1, key_share_threshold: 2, key_share_count: 2 };
+  session = { expires_at: new Date(Date.now() + 60_000).toISOString(), status: "initialized" };
+
+  constructor(private readonly terminalState: "aborted" | "deleted") {}
+
+  prepare(query: string) {
+    const database = this;
+    const statement = {
+      query,
+      bind(..._values: unknown[]) { return statement; },
+      async first() {
+        if (query.includes("FROM files")) return { ...database.file };
+        if (query.includes("FROM upload_sessions")) {
+          const session = { ...database.session };
+          database.session.status = "aborted";
+          database.file.status = database.terminalState === "aborted" ? "failed" : "deleted";
+          return session;
+        }
+        if (query.includes("FROM devices")) return { public_key: null, receipt_id: null };
+        return null;
+      },
+      async run() { return { meta: { changes: 0 } }; },
+    };
+    return statement as unknown as D1PreparedStatement;
+  }
+
+  async batch(statements: D1PreparedStatement[]) {
+    for (const statement of statements as unknown as Array<{ query?: string }>) {
+      if (statement.query?.startsWith("UPDATE files SET")) this.file.status = "available";
+      if (statement.query?.startsWith("UPDATE upload_sessions SET") && this.session.status !== "aborted") this.session.status = "complete";
+    }
+    return [];
+  }
+}
+
+describe("upload completion races", () => {
+  test.each(["aborted", "deleted"] as const)("does not resurrect a %s upload after a stale completion read", async (terminalState) => {
+    const database = new CompletionRaceDatabase(terminalState);
+    const env: Env = { DB: database as unknown as D1Database, JWT_SECRET: "test-secret-that-is-long-and-random", WEB_ORIGIN: "http://localhost:5173" };
+    const token = await issueAccessToken("user-a", "owner@example.com", env.JWT_SECRET);
+    const object = (kind: "shard" | "key-share", index: number) => ({ id: crypto.randomUUID(), kind, index, nodeId: "mock-a", objectId: `object-${kind}-${index}`, size: 1, checksum: "b".repeat(64), ...(kind === "shard" ? { shardType: "data" as const } : {}), status: "stored" as const });
+    const response = await app.request(`http://api/files/${database.file.id}/complete`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ compressedSize: 1, encryptedSize: 17, ciphertextHash: "c".repeat(64), encryptionIv: "abcdefghijklmnop", shardSize: 17, objects: [object("shard", 0), object("key-share", 0), object("key-share", 1)] }),
+    }, env);
+
+    expect(response.status).toBe(409);
+    expect(database.file.status).toBe(terminalState === "aborted" ? "failed" : "deleted");
+    expect(database.session.status).toBe("aborted");
   });
 });
