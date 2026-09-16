@@ -136,7 +136,7 @@ router.post("/:id/capabilities", requireAuth, async (c) => {
   if (input.operation === "PUT") {
     if (file.status !== "uploading" || !input.objectId.startsWith(`${input.fileId}/`)) throw new ApiError(403, "capability_scope_invalid", "Upload capability is outside the active file scope");
   } else {
-    const stored = await c.env.DB.prepare("SELECT object_id FROM (SELECT sl.object_id,sl.device_id,s.file_id FROM shard_locations sl JOIN shards s ON s.id=sl.shard_id UNION ALL SELECT object_id,device_id,file_id FROM key_shares) WHERE device_id=? AND file_id=? AND object_id=? LIMIT 1").bind(node.id, input.fileId, input.objectId).first();
+    const stored = await c.env.DB.prepare("SELECT object_id FROM (SELECT sl.object_id,sl.device_id,s.file_id FROM shard_locations sl JOIN shards s ON s.id=sl.shard_id UNION ALL SELECT object_id,device_id,file_id FROM key_shares UNION ALL SELECT object_id,device_id,file_id FROM issued_capabilities WHERE user_id=? AND operation='PUT') WHERE device_id=? AND file_id=? AND object_id=? LIMIT 1").bind(user.id, node.id, input.fileId, input.objectId).first();
     if (!stored) throw new ApiError(403, "capability_scope_invalid", "Object is not assigned to this file and node");
   }
   const now = Math.floor(Date.now() / 1000);
@@ -156,6 +156,11 @@ router.post("/:id/receipts", requireAuth, async (c) => {
   const node = await c.env.DB.prepare("SELECT id,public_key FROM devices WHERE id=? AND owner_user_id=? AND public_key IS NOT NULL").bind(c.req.param("id"), user.id).first<NodeRow>();
   if (!node) throw new ApiError(404, "node_not_found", "Storage node not found");
   const receipt = await verifyEnvelope(body.data.receipt, node.public_key, storageReceiptSchema).catch(() => { throw new ApiError(401, "receipt_invalid", "Storage receipt signature is invalid"); });
+  const existing = await c.env.DB.prepare("SELECT user_id,file_id,device_id,object_id,checksum,size FROM storage_receipts WHERE request_id=?").bind(receipt.requestId).first<{ user_id: string; file_id: string; device_id: string; object_id: string; checksum: string; size: number }>();
+  if (existing) {
+    if (existing.user_id !== user.id || existing.file_id !== body.data.fileId || existing.device_id !== node.id || existing.object_id !== receipt.objectId || existing.checksum !== receipt.checksum || existing.size !== receipt.size) throw new ApiError(409, "receipt_already_submitted", "Storage receipt was already submitted for a different object");
+    return c.json({ accepted: true, nodeId: node.id, objectId: receipt.objectId });
+  }
   const issued = await c.env.DB.prepare("SELECT jti,device_id,object_id,operation,checksum,size,expires_at FROM issued_capabilities WHERE jti=? AND user_id=? AND file_id=?").bind(receipt.requestId, user.id, body.data.fileId).first<IssuedRow>();
   if (!issued || Date.parse(issued.expires_at) <= Date.now() || !receiptMatchesCapability(receipt, { jti: issued.jti, nodeId: issued.device_id, objectId: issued.object_id, operation: issued.operation, ...(issued.checksum ? { checksum: issued.checksum } : {}), ...(issued.checksum ? { size: issued.size ?? undefined } : { maxSize: issued.size ?? undefined }) })) throw new ApiError(422, "receipt_scope_invalid", "Storage receipt does not match an active upload capability");
   const now = Math.floor(Date.now() / 1000);
@@ -166,6 +171,8 @@ router.post("/:id/receipts", requireAuth, async (c) => {
       c.env.DB.prepare("UPDATE issued_capabilities SET receipt_received_at=datetime('now') WHERE jti=? AND receipt_received_at IS NULL").bind(receipt.requestId),
     ]);
   } catch {
+    const duplicate = await c.env.DB.prepare("SELECT user_id,file_id,device_id,object_id,checksum,size FROM storage_receipts WHERE request_id=?").bind(receipt.requestId).first<{ user_id: string; file_id: string; device_id: string; object_id: string; checksum: string; size: number }>();
+    if (duplicate && duplicate.user_id === user.id && duplicate.file_id === body.data.fileId && duplicate.device_id === node.id && duplicate.object_id === receipt.objectId && duplicate.checksum === receipt.checksum && duplicate.size === receipt.size) return c.json({ accepted: true, nodeId: node.id, objectId: receipt.objectId });
     throw new ApiError(409, "receipt_already_submitted", "Storage receipt was already submitted");
   }
   return c.json({ accepted: true, nodeId: node.id, objectId: receipt.objectId });

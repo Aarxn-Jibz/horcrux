@@ -51,11 +51,9 @@ class CompletionRaceDatabase {
   }
 
   async batch(statements: D1PreparedStatement[]) {
-    for (const statement of statements as unknown as Array<{ query?: string }>) {
-      if (statement.query?.startsWith("UPDATE files SET")) this.file.status = "available";
-      if (statement.query?.startsWith("UPDATE upload_sessions SET") && this.session.status !== "aborted") this.session.status = "complete";
-    }
-    return [];
+    // The stale terminal transition wins before this transactional batch starts,
+    // so every conditional statement is a no-op.
+    return statements.map(() => ({ meta: { changes: 0 } })) as D1Result[];
   }
 }
 

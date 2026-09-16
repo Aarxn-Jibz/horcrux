@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { DEFAULT_PIPELINE } from "@horcrux-file-system/shared";
 import { Sha256Stream, sha256, type PipelineProgressDetail, type PipelineStage } from "@horcrux-file-system/core";
-import { completeFile, deleteFile, initializeFile, updateUploadState } from "../lib/api";
+import { completeFile, deleteFile, getFile, initializeFile, updateUploadState } from "../lib/api";
 import { createChunkedFilePipeline, createFilePipeline, storageMode } from "../lib/pipeline";
 import { formatBytes } from "./FileList";
 import { ProgressSteps, TimingSummary } from "./ProgressSteps";
@@ -36,7 +36,12 @@ export function UploadPanel({ onComplete }: { onComplete(): void }) {
         ? await createChunkedFilePipeline(endpoints, storageMode).upload({ fileId, name: file.name, mimeType: file.type, size: file.size, source: () => fileStream(file), plaintextHash }, DEFAULT_PIPELINE, initialized.nodes.map((node) => node.id))
         : await createFilePipeline(storageMode, endpoints).upload({ fileId, name: file.name, mimeType: file.type, bytes: bytes!, plaintextHash }, DEFAULT_PIPELINE, initialized.nodes.map((node) => node.id), (nextStage, detail) => { setStage(nextStage); setTiming(detail); });
       setStage("saving");
-      await completeFile(fileId, manifest);
+      try {
+        await completeFile(fileId, manifest);
+      } catch (cause) {
+        const current = await getFile(fileId).catch(() => null);
+        if (current?.status !== "available") throw cause;
+      }
       setStage("complete");
       setFile(undefined);
       onComplete();
