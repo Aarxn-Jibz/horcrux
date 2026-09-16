@@ -47,6 +47,13 @@ export const heartbeatSchema = z.object({
   nodeVersion: z.string().min(1).max(64),
   endpoint: z.string().url().max(512),
   timestamp: z.int().nonnegative(),
+  features: z.array(z.literal("deletion-tasks-v1")).max(8).optional(),
+  deletionResults: z.array(z.object({
+    taskId: z.uuid(),
+    objectId: identifier,
+    status: z.enum(["deleted", "failed"]),
+    error: z.string().min(1).max(256).optional(),
+  })).max(32).optional(),
 });
 export type NodeHeartbeat = z.infer<typeof heartbeatSchema>;
 

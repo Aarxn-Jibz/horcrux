@@ -213,11 +213,10 @@ func (s *Store) Metadata(ctx context.Context, objectID string) (Metadata, error)
 }
 
 func (s *Store) Delete(ctx context.Context, objectID string) error {
-	metadata, err := s.Metadata(ctx, objectID)
-	if err != nil {
+	if err := ValidateObjectID(objectID); err != nil {
 		return err
 	}
-	if err := os.Remove(metadata.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := os.Remove(s.objectPath(objectID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("delete object bytes: %w", err)
 	}
 	if _, err := s.database.ExecContext(ctx, "UPDATE objects SET status='deleted' WHERE object_id=?", objectID); err != nil {

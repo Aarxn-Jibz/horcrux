@@ -14,6 +14,8 @@ class NodeDatabase {
   issued: QueryResult = null;
   readonly runs: Array<{ query: string; bindings: unknown[] }> = [];
   batches = 0;
+  deletionTasks: Array<{ id: string; file_id: string; owner_user_id: string; object_id: string }> = [];
+  readonly batched: Array<Array<{ query: string; bindings: unknown[] }>> = [];
 
   constructor(publicKey: string) {
     this.node = { id: "node-a", public_key: publicKey };
@@ -23,10 +25,12 @@ class NodeDatabase {
     const database = this;
     let bindings: unknown[] = [];
     const statement = {
+      query,
       bind(...values: unknown[]) {
         bindings = values;
         return statement;
       },
+      get bindings() { return bindings; },
       async first() {
         if (query.includes("FROM devices")) return database.node;
         if (query.includes("FROM files")) return database.file;
@@ -37,12 +41,17 @@ class NodeDatabase {
         database.runs.push({ query, bindings });
         return {};
       },
+      async all() {
+        if (query.startsWith("SELECT t.id,t.file_id")) return { results: database.deletionTasks };
+        return { results: [] };
+      },
     };
     return statement as unknown as D1PreparedStatement;
   }
 
-  async batch(_statements: D1PreparedStatement[]) {
+  async batch(statements: D1PreparedStatement[]) {
     this.batches += 1;
+    this.batched.push((statements as unknown as Array<{ query: string; bindings: unknown[] }>).map((statement) => ({ query: statement.query, bindings: statement.bindings })));
     return [];
   }
 }
@@ -119,6 +128,28 @@ describe("storage node control plane", () => {
 
     expect(response.status).toBe(200);
     expect(database.runs[0]?.bindings).toEqual(["online", 10_000, 4_000, 6_000, "0.1.0", "1", "https://192.168.1.42:9443", "healthy", "node-a"]);
+  });
+
+  test("issues fresh delete work only to deletion-task nodes", async () => {
+    const nodeKeys = await generateNodeKeys(); const controlKeys = await generateNodeKeys(); const database = new NodeDatabase(nodeKeys.publicKey);
+    const taskId = crypto.randomUUID(); const objectId = "file-a/shard/object-a";
+    database.deletionTasks = [{ id: taskId, file_id: "file-a", owner_user_id: "user-a", object_id: objectId }];
+    const heartbeat = { version: "1" as const, nodeId: "node-a", status: "online" as const, capacityBytes: 10_000, usedBytes: 4_000, availableBytes: 6_000, nodeVersion: "0.1.0", endpoint: "https://192.168.1.42:9443", timestamp: Math.floor(Date.now() / 1_000), features: ["deletion-tasks-v1" as const] };
+    const response = await app.request("http://api/nodes/node-a/heartbeat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ heartbeat: await signEnvelope(heartbeatSchema.parse(heartbeat), nodeKeys.privateKey) }) }, environment(database, controlKeys.privateKey));
+    expect(response.status).toBe(200);
+    const body = await response.json() as { deleteTasks: Array<{ taskId: string; objectId: string; capability: string }> };
+    expect(body.deleteTasks).toHaveLength(1);
+    expect(body.deleteTasks[0]).toMatchObject({ taskId, objectId });
+    expect(await verifyEnvelope(body.deleteTasks[0]!.capability, controlKeys.publicKey, storageCapabilitySchema)).toMatchObject({ nodeId: "node-a", objectId, operation: "DELETE" });
+  });
+
+  test("binds deletion acknowledgements to the reporting node and object", async () => {
+    const nodeKeys = await generateNodeKeys(); const database = new NodeDatabase(nodeKeys.publicKey); const taskId = crypto.randomUUID(); const objectId = "file-a/shard/object-a";
+    const heartbeat = { version: "1" as const, nodeId: "node-a", status: "online" as const, capacityBytes: 10_000, usedBytes: 4_000, availableBytes: 6_000, nodeVersion: "0.1.0", endpoint: "https://192.168.1.42:9443", timestamp: Math.floor(Date.now() / 1_000), deletionResults: [{ taskId, objectId, status: "deleted" as const }] };
+    const response = await app.request("http://api/nodes/node-a/heartbeat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ heartbeat: await signEnvelope(heartbeatSchema.parse(heartbeat), nodeKeys.privateKey) }) }, environment(database));
+    expect(response.status).toBe(200);
+    const statements = database.batched.flatMap((batch) => batch);
+    expect(statements.find((statement) => statement.query.startsWith("UPDATE file_deletion_tasks"))?.bindings).toEqual([taskId, "node-a", objectId]);
   });
 
   test("issues an object-scoped grant and accepts only its matching node receipt", async () => {

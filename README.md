@@ -103,7 +103,7 @@ All browser-facing routes require a short-lived access JWT (`Bearer <token>`). N
 | `GET` | `/files/:id` | Access JWT | Fetch file metadata |
 | `GET` | `/files/:id/download-manifest` | Access JWT | Fetch reconstruction manifest & GET grants |
 | `POST` | `/files/:id/complete` | Access JWT | Mark file upload completed after receipt verification |
-| `DELETE` | `/files/:id` | Access JWT | Delete file and issue DELETE capabilities to nodes |
+| `DELETE` | `/files/:id` | Access JWT | Start durable deletion; nodes pull scoped DELETE work through heartbeats until every object is acknowledged |
 
 ---
 
@@ -215,4 +215,3 @@ bun run test:large-file
 For deeper technical details, refer to:
 - [Architecture Guide](docs/architecture.md) — Trust boundaries, scheduling, memory model, and WebRTC/STUN/TURN roadmap.
 - [Security Model](docs/security.md) — Node identity, cryptographic capabilities, storage receipts, and threat analysis.
-

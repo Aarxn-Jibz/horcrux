@@ -5,9 +5,11 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -59,4 +61,27 @@ func TestReporterSendsSignedCapacityPayload(t *testing.T) {
 	if received.NodeID != "node-a" || received.CapacityBytes != 1000 || received.UsedBytes != 250 || received.AvailableBytes != 750 || received.NodeVersion != "0.1.0" || received.Endpoint != "https://192.168.1.42:9443" || received.Timestamp != now.Unix() {
 		t.Fatalf("unexpected heartbeat: %#v", received)
 	}
+}
+
+func TestReporterAcknowledgesCompletedDeletionOnNextHeartbeat(t *testing.T) {
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil { t.Fatal(err) }
+	requests := 0
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requests++
+		var body struct { Heartbeat string `json:"heartbeat"` }
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil { t.Fatal(err) }
+		payloadBytes, err := base64.RawURLEncoding.DecodeString(strings.Split(body.Heartbeat, ".")[0])
+		if err != nil { t.Fatal(err) }
+		var payload Payload
+		if err := json.Unmarshal(payloadBytes, &payload); err != nil { t.Fatal(err) }
+		if requests == 1 {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"deleteTasks":[{"taskId":"00000000-0000-4000-8000-000000000001","objectId":"file/object","capability":"cap"}]}`)), Header: make(http.Header)}, nil
+		}
+		if len(payload.DeletionResults) != 1 || payload.DeletionResults[0].TaskID != "00000000-0000-4000-8000-000000000001" || payload.DeletionResults[0].Status != "deleted" { t.Fatalf("missing deletion acknowledgement: %#v", payload.DeletionResults) }
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{}`)), Header: make(http.Header)}, nil
+	})}
+	reporter := Reporter{ControlPlaneURL: "https://control.example", NodeID: "node-a", NodeVersion: "0.1.0", Endpoint: "https://192.168.1.42:9443", Stats: testStats{storage.Stats{}}, Signer: testSigner{privateKey}, Client: client, Delete: func(_ context.Context, task DeletionTask) error { if task.ObjectID != "file/object" || task.Capability != "cap" { t.Fatalf("unexpected task: %#v", task) }; return nil }}
+	if err := reporter.Report(context.Background()); err != nil { t.Fatal(err) }
+	if err := reporter.Report(context.Background()); err != nil { t.Fatal(err) }
 }

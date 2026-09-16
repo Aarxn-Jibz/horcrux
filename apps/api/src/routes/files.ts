@@ -67,9 +67,32 @@ router.post("/:id/complete", async (c) => {
 router.post("/:id/state", async (c) => { const file = await getOwnedFile(c.env.DB, c.req.param("id"), c.get("user").id); if (file.status !== "uploading") throw new ApiError(409, "invalid_upload_state", "File upload is not active"); const parsed = z.object({ status: z.enum(["distributing", "aborted"]) }).safeParse(await c.req.json().catch(() => null)); if (!parsed.success) throw new ApiError(422, "validation_error", "Invalid upload state"); const transition = await c.env.DB.prepare("UPDATE upload_sessions SET status=?,updated_at=datetime('now') WHERE file_id=? AND user_id=? AND status IN ('initialized','distributing') AND EXISTS (SELECT 1 FROM files WHERE id=? AND owner_user_id=? AND status='uploading')").bind(parsed.data.status, file.id, c.get("user").id, file.id, c.get("user").id).run(); if (!transition.meta.changes) throw new ApiError(409, "invalid_upload_state", "File upload state changed concurrently"); if (parsed.data.status === "aborted") await c.env.DB.prepare("UPDATE files SET status='failed' WHERE id=? AND owner_user_id=? AND status='uploading' AND EXISTS (SELECT 1 FROM upload_sessions WHERE file_id=? AND user_id=? AND status='aborted')").bind(file.id, c.get("user").id, file.id, c.get("user").id).run(); return c.json({ fileId: file.id, status: parsed.data.status }); });
 
 router.get("/", async (c) => { const result = await c.env.DB.prepare("SELECT * FROM files WHERE owner_user_id=? AND status!='deleted' ORDER BY created_at DESC").bind(c.get("user").id).all<import("../data/files").FileRow>(); return c.json({ files: result.results.map(serializeFile) }); });
-router.get("/:id/download-manifest", async (c) => { const file = await getOwnedFile(c.env.DB, c.req.param("id"), c.get("user").id); if (file.status !== "available") throw new ApiError(409, "file_unavailable", "File is not available for reconstruction"); return c.json({ ...serializeFile(file), objects: await getObjects(c.env.DB, file.id) }); });
-router.get("/:id/shards", async (c) => { const file = await getOwnedFile(c.env.DB, c.req.param("id"), c.get("user").id); return c.json({ objects: await getObjects(c.env.DB, file.id) }); });
-router.get("/:id", async (c) => c.json({ ...(serializeFile(await getOwnedFile(c.env.DB, c.req.param("id"), c.get("user").id))), objects: await getObjects(c.env.DB, c.req.param("id")) }));
-router.delete("/:id", async (c) => { const file = await getOwnedFile(c.env.DB, c.req.param("id"), c.get("user").id); if (file.status === "uploading") { const abort = await c.env.DB.prepare("UPDATE upload_sessions SET status='aborted',updated_at=datetime('now') WHERE file_id=? AND user_id=? AND status IN ('initialized','distributing') AND EXISTS (SELECT 1 FROM files WHERE id=? AND owner_user_id=? AND status='uploading')").bind(file.id, c.get("user").id, file.id, c.get("user").id).run(); if (!abort.meta.changes) throw new ApiError(409, "invalid_upload_state", "File upload is being completed"); } const deleted = await c.env.DB.prepare("UPDATE files SET status='deleted',deleted_at=datetime('now') WHERE id=? AND owner_user_id=? AND status=?").bind(file.id, c.get("user").id, file.status).run(); if (!deleted.meta.changes) throw new ApiError(409, "invalid_upload_state", "File state changed concurrently"); return c.body(null, 204); });
+router.get("/:id/download-manifest", async (c) => { const file = await getOwnedFile(c.env.DB, c.req.param("id"), c.get("user").id); if (file.status !== "available" || file.deletion_state) throw new ApiError(409, "file_unavailable", "File is not available for reconstruction"); return c.json({ ...serializeFile(file), objects: await getObjects(c.env.DB, file.id) }); });
+router.get("/:id/shards", async (c) => { const file = await getOwnedFile(c.env.DB, c.req.param("id"), c.get("user").id); if (file.deletion_state) throw new ApiError(409, "file_unavailable", "File is being deleted"); return c.json({ objects: await getObjects(c.env.DB, file.id) }); });
+router.get("/:id", async (c) => { const file = await getOwnedFile(c.env.DB, c.req.param("id"), c.get("user").id); return c.json({ ...serializeFile(file), objects: file.deletion_state ? [] : await getObjects(c.env.DB, file.id) }); });
+
+type DeletionCandidate = { source_id: string; object_kind: "shard" | "key-share"; device_id: string; object_id: string };
+
+async function pendingDeletionCount(db: D1Database, fileId: string) {
+  return (await db.prepare("SELECT COUNT(*) count FROM file_deletion_tasks WHERE file_id=? AND status='pending'").bind(fileId).first<{ count: number }>())?.count ?? 0;
+}
+
+router.delete("/:id", async (c) => {
+  const user = c.get("user"); const file = await getOwnedFile(c.env.DB, c.req.param("id"), user.id);
+  if (file.deletion_state) return c.json({ fileId: file.id, status: "deleting", pendingObjects: await pendingDeletionCount(c.env.DB, file.id) }, 202);
+  if (file.status === "available") {
+    const objects = await c.env.DB.prepare("SELECT sl.id source_id,'shard' object_kind,sl.device_id,sl.object_id FROM shard_locations sl JOIN shards s ON s.id=sl.shard_id WHERE s.file_id=? AND s.status='stored' AND sl.status='stored' UNION ALL SELECT ks.id source_id,'key-share' object_kind,ks.device_id,ks.object_id FROM key_shares ks WHERE ks.file_id=? AND ks.status='stored'").bind(file.id, file.id).all<DeletionCandidate>();
+    const statements: D1PreparedStatement[] = [
+      c.env.DB.prepare("UPDATE files SET deletion_state='pending',deletion_requested_at=datetime('now') WHERE id=? AND owner_user_id=? AND status='available' AND deletion_state IS NULL").bind(file.id, user.id),
+      ...objects.results.map((object) => c.env.DB.prepare("INSERT INTO file_deletion_tasks (id,file_id,device_id,object_id,object_kind,source_id) SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM files WHERE id=? AND owner_user_id=? AND deletion_state='pending') ON CONFLICT(file_id,object_kind,source_id) DO NOTHING").bind(crypto.randomUUID(), file.id, object.device_id, object.object_id, object.object_kind, object.source_id, file.id, user.id)),
+    ];
+    try { await c.env.DB.batch(statements); } catch { throw new ApiError(503, "deletion_init_failed", "Deletion could not be initiated"); }
+    const current = await getOwnedFile(c.env.DB, file.id, user.id);
+    if (!current.deletion_state) throw new ApiError(409, "invalid_file_state", "File state changed concurrently");
+    return c.json({ fileId: file.id, status: "deleting", pendingObjects: await pendingDeletionCount(c.env.DB, file.id) }, 202);
+  }
+  if (file.status === "uploading") { const abort = await c.env.DB.prepare("UPDATE upload_sessions SET status='aborted',updated_at=datetime('now') WHERE file_id=? AND user_id=? AND status IN ('initialized','distributing') AND EXISTS (SELECT 1 FROM files WHERE id=? AND owner_user_id=? AND status='uploading')").bind(file.id, user.id, file.id, user.id).run(); if (!abort.meta.changes) throw new ApiError(409, "invalid_upload_state", "File upload is being completed"); }
+  const deleted = await c.env.DB.prepare("UPDATE files SET status='deleted',deleted_at=datetime('now') WHERE id=? AND owner_user_id=? AND status=? AND deletion_state IS NULL").bind(file.id, user.id, file.status).run(); if (!deleted.meta.changes) throw new ApiError(409, "invalid_upload_state", "File state changed concurrently"); return c.body(null, 204);
+});
 
 export default router;

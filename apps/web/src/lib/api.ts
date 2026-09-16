@@ -32,7 +32,7 @@ export function completeFile(fileId: string, manifest: FileManifest | ChunkedMan
 function isChunkedManifest(manifest: FileManifest | ChunkedManifest): manifest is ChunkedManifest { return "formatVersion" in manifest && manifest.formatVersion === 2; }
 export function downloadManifest(fileId: string) { return request<FileManifest>(`/files/${fileId}/download-manifest`); }
 export function getFile(fileId: string) { return request<FileSummary & { objects: FileManifest["objects"] }>(`/files/${fileId}`); }
-export function deleteFile(fileId: string) { return request<void>(`/files/${fileId}`, { method: "DELETE" }); }
+export function deleteFile(fileId: string) { return request<{ fileId: string; status: "deleting"; pendingObjects: number } | void>(`/files/${fileId}`, { method: "DELETE" }); }
 
 export async function requestNodeCapability(input: CapabilityRequest) {
   const { nodeId, ...body } = input;

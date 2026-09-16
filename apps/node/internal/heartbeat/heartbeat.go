@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/horcrux-file-system/horcrux/apps/node/internal/receipt"
@@ -31,6 +32,25 @@ type Payload struct {
 	NodeVersion    string `json:"nodeVersion"`
 	Endpoint       string `json:"endpoint"`
 	Timestamp      int64  `json:"timestamp"`
+	Features       []string          `json:"features,omitempty"`
+	DeletionResults []DeletionResult `json:"deletionResults,omitempty"`
+}
+
+type DeletionResult struct {
+	TaskID   string `json:"taskId"`
+	ObjectID string `json:"objectId"`
+	Status   string `json:"status"`
+	Error    string `json:"error,omitempty"`
+}
+
+type DeletionTask struct {
+	TaskID     string `json:"taskId"`
+	ObjectID   string `json:"objectId"`
+	Capability string `json:"capability"`
+}
+
+type deletionResponse struct {
+	DeleteTasks []DeletionTask `json:"deleteTasks"`
 }
 
 type StatsProvider interface {
@@ -48,6 +68,9 @@ type Reporter struct {
 	Client          *http.Client
 	OnError         func(error)
 	Now             func() time.Time
+	Delete          func(context.Context, DeletionTask) error
+	pendingResults  []DeletionResult
+	resultsMu       sync.Mutex
 }
 
 func (reporter *Reporter) Run(ctx context.Context) {
@@ -77,7 +100,10 @@ func (reporter *Reporter) Report(ctx context.Context) error {
 	if reporter.Now != nil {
 		now = reporter.Now().UTC()
 	}
-	payload := Payload{Version: ProtocolVersion, NodeID: reporter.NodeID, Status: "online", CapacityBytes: stats.CapacityBytes, UsedBytes: stats.UsedBytes, AvailableBytes: stats.AvailableBytes, NodeVersion: reporter.NodeVersion, Endpoint: reporter.Endpoint, Timestamp: now.Unix()}
+	reporter.resultsMu.Lock()
+	results := append([]DeletionResult(nil), reporter.pendingResults...)
+	reporter.resultsMu.Unlock()
+	payload := Payload{Version: ProtocolVersion, NodeID: reporter.NodeID, Status: "online", CapacityBytes: stats.CapacityBytes, UsedBytes: stats.UsedBytes, AvailableBytes: stats.AvailableBytes, NodeVersion: reporter.NodeVersion, Endpoint: reporter.Endpoint, Timestamp: now.Unix(), Features: []string{"deletion-tasks-v1"}, DeletionResults: results}
 	token, err := Sign(payload, reporter.Signer)
 	if err != nil {
 		return err
@@ -103,6 +129,32 @@ func (reporter *Reporter) Report(ctx context.Context) error {
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("heartbeat rejected with status %d", response.StatusCode)
+	}
+	if len(results) > 0 {
+		reporter.resultsMu.Lock()
+		if len(reporter.pendingResults) >= len(results) {
+			reporter.pendingResults = reporter.pendingResults[len(results):]
+		}
+		reporter.resultsMu.Unlock()
+	}
+	if response.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	var reply deletionResponse
+	if err := json.NewDecoder(response.Body).Decode(&reply); err != nil {
+		return fmt.Errorf("decode heartbeat response: %w", err)
+	}
+	for _, task := range reply.DeleteTasks {
+		if reporter.Delete == nil {
+			break
+		}
+		result := DeletionResult{TaskID: task.TaskID, ObjectID: task.ObjectID, Status: "deleted"}
+		if err := reporter.Delete(ctx, task); err != nil {
+			result.Status, result.Error = "failed", err.Error()
+		}
+		reporter.resultsMu.Lock()
+		reporter.pendingResults = append(reporter.pendingResults, result)
+		reporter.resultsMu.Unlock()
 	}
 	return nil
 }

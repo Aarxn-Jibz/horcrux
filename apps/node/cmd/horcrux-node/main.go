@@ -71,7 +71,7 @@ func main() {
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if configuration.ControlPlaneURL != "" {
-		reporter := &heartbeat.Reporter{ControlPlaneURL: configuration.ControlPlaneURL, NodeID: nodeIdentity.NodeID, NodeVersion: server.Version, Endpoint: configuration.AdvertiseURL, Interval: configuration.HeartbeatInterval, Stats: objectStore, Signer: nodeIdentity, OnError: func(err error) { slog.Warn("heartbeat failed", "error", err) }}
+		reporter := &heartbeat.Reporter{ControlPlaneURL: configuration.ControlPlaneURL, NodeID: nodeIdentity.NodeID, NodeVersion: server.Version, Endpoint: configuration.AdvertiseURL, Interval: configuration.HeartbeatInterval, Stats: objectStore, Signer: nodeIdentity, Delete: func(ctx context.Context, task heartbeat.DeletionTask) error { if _, err := verifier.Verify(task.Capability, "DELETE", task.ObjectID); err != nil { return err }; return objectStore.Delete(ctx, task.ObjectID) }, OnError: func(err error) { slog.Warn("heartbeat failed", "error", err) }}
 		go reporter.Run(shutdownContext)
 		webrtcService := &webrtcnode.Service{Manager: webrtcnode.NewManager(nil), Signals: &webrtcnode.SignalingClient{ControlPlaneURL: configuration.ControlPlaneURL, NodeID: nodeIdentity.NodeID, Signer: nodeIdentity}, NodeID: nodeIdentity.NodeID, Store: objectStore, Verifier: verifier, Signer: nodeIdentity}
 		go webrtcService.Run(shutdownContext)

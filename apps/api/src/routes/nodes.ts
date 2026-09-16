@@ -26,6 +26,7 @@ const enrollmentSchema = z.object({
 type ChallengeRow = { user_id: string; expires_at: string; used_at: string | null };
 type NodeRow = { id: string; public_key: string };
 type IssuedRow = { jti: string; device_id: string; object_id: string; operation: "PUT"; checksum: string | null; size: number | null; expires_at: string };
+type DeletionTaskRow = { id: string; file_id: string; owner_user_id: string; object_id: string };
 const capabilityRequestSchema = z.object({ fileId: z.uuid(), objectId: z.string().min(1).max(256), operation: z.enum(["PUT", "GET", "DELETE"]), checksum: z.string().regex(/^[a-f0-9]{64}$/).optional(), size: z.int().nonnegative().optional(), maxSize: z.int().positive().optional() }).refine((input) => input.operation !== "PUT" || input.maxSize !== undefined || (input.checksum !== undefined && input.size !== undefined), "PUT capabilities require exact metadata or a maximum size").refine((input) => input.maxSize === undefined || (input.checksum === undefined && input.size === undefined), "streamed PUT final metadata is node-attested");
 const router = new Hono<{ Bindings: Env; Variables: ApiVariables }>();
 
@@ -87,7 +88,32 @@ router.post("/:id/heartbeat", async (c) => {
     node.id,
   ).run();
 
-  return c.json({ accepted: true, nodeId: node.id });
+  for (const result of heartbeat.deletionResults ?? []) {
+    if (result.status === "deleted") {
+      await c.env.DB.batch([
+        c.env.DB.prepare("UPDATE file_deletion_tasks SET status='deleted',completed_at=datetime('now'),last_error=NULL WHERE id=? AND device_id=? AND object_id=? AND status='pending'").bind(result.taskId, node.id, result.objectId),
+        c.env.DB.prepare("UPDATE shard_locations SET status='deleted' WHERE id=(SELECT source_id FROM file_deletion_tasks WHERE id=? AND device_id=? AND object_id=? AND object_kind='shard' AND status='deleted')").bind(result.taskId, node.id, result.objectId),
+        c.env.DB.prepare("UPDATE key_shares SET status='deleted' WHERE id=(SELECT source_id FROM file_deletion_tasks WHERE id=? AND device_id=? AND object_id=? AND object_kind='key-share' AND status='deleted')").bind(result.taskId, node.id, result.objectId),
+        c.env.DB.prepare("UPDATE files SET status='deleted',deletion_state=NULL,deleted_at=datetime('now') WHERE id=(SELECT file_id FROM file_deletion_tasks WHERE id=? AND device_id=? AND object_id=?) AND deletion_state='pending' AND NOT EXISTS (SELECT 1 FROM file_deletion_tasks WHERE file_id=files.id AND status='pending')").bind(result.taskId, node.id, result.objectId),
+      ]);
+    } else {
+      await c.env.DB.prepare("UPDATE file_deletion_tasks SET last_error=? WHERE id=? AND device_id=? AND object_id=? AND status='pending'").bind(result.error ?? "node deletion failed", result.taskId, node.id, result.objectId).run();
+    }
+  }
+
+  const deleteTasks: { taskId: string; objectId: string; capability: string }[] = [];
+  if (heartbeat.features?.includes("deletion-tasks-v1")) {
+    const pending = await c.env.DB.prepare("SELECT t.id,t.file_id,f.owner_user_id,t.object_id FROM file_deletion_tasks t JOIN files f ON f.id=t.file_id WHERE t.device_id=? AND t.status='pending' AND f.deletion_state='pending' ORDER BY t.created_at,t.id LIMIT 16").bind(node.id).all<DeletionTaskRow>();
+    const now = Math.floor(Date.now() / 1000); const expiresAt = now + 5 * 60;
+    for (const task of pending.results) {
+      const capability: StorageCapability = { version: PROTOCOL_VERSION, issuer: "horcrux-control-plane", nodeId: node.id, objectId: task.object_id, operation: "DELETE", issuedAt: now, expiresAt, jti: crypto.randomUUID() };
+      const token = await issueCapability(capability, c.env.CAPABILITY_PRIVATE_KEY).catch(() => { throw new ApiError(503, "capability_signing_unavailable", "Capability signing is not configured"); });
+      deleteTasks.push({ taskId: task.id, objectId: task.object_id, capability: token });
+    }
+    if (deleteTasks.length) await c.env.DB.batch(deleteTasks.map((task) => c.env.DB.prepare("UPDATE file_deletion_tasks SET attempt_count=attempt_count+1,last_dispatched_at=datetime('now') WHERE id=? AND device_id=? AND object_id=? AND status='pending'").bind(task.taskId, node.id, task.objectId)));
+  }
+
+  return c.json({ accepted: true, nodeId: node.id, ...(deleteTasks.length ? { deleteTasks } : {}) });
 });
 
 function isSecureNodeEndpoint(value: string) {
@@ -105,7 +131,7 @@ router.post("/:id/capabilities", requireAuth, async (c) => {
   const user = c.get("user");
   const node = await c.env.DB.prepare("SELECT id,public_key FROM devices WHERE id=? AND owner_user_id=? AND public_key IS NOT NULL").bind(c.req.param("id"), user.id).first<NodeRow>();
   if (!node) throw new ApiError(404, "node_not_found", "Storage node not found");
-  const file = await c.env.DB.prepare("SELECT status FROM files WHERE id=? AND owner_user_id=? AND status!='deleted'").bind(input.fileId, user.id).first<{ status: string }>();
+  const file = await c.env.DB.prepare("SELECT status FROM files WHERE id=? AND owner_user_id=? AND status!='deleted' AND deletion_state IS NULL").bind(input.fileId, user.id).first<{ status: string }>();
   if (!file) throw new ApiError(404, "file_not_found", "File not found");
   if (input.operation === "PUT") {
     if (file.status !== "uploading" || !input.objectId.startsWith(`${input.fileId}/`)) throw new ApiError(403, "capability_scope_invalid", "Upload capability is outside the active file scope");

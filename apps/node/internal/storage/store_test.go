@@ -53,6 +53,9 @@ func TestPutReadDeleteAndCapacity(t *testing.T) {
 	if err := store.Delete(context.Background(), metadata.ObjectID); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.Delete(context.Background(), metadata.ObjectID); err != nil {
+		t.Fatalf("repeated delete must succeed: %v", err)
+	}
 	if _, _, err := store.OpenObject(context.Background(), metadata.ObjectID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected deleted object to be missing, got %v", err)
 	}

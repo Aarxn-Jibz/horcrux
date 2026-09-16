@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import type { FileManifest, FileSummary } from "@horcrux-file-system/shared";
-import { DEFAULT_OPERATION_CONCURRENCY, mapBounded, type ChunkedManifest, type PipelineProgressDetail, type PipelineStage } from "@horcrux-file-system/core";
+import { type ChunkedManifest, type PipelineProgressDetail, type PipelineStage } from "@horcrux-file-system/core";
 import { deleteFile, downloadManifest, getFile } from "../lib/api";
-import { createChunkedFilePipeline, createFilePipeline, createStorageTransport } from "../lib/pipeline";
+import { createChunkedFilePipeline, createFilePipeline } from "../lib/pipeline";
 import { formatBytes } from "./FileList";
 import { ProgressSteps, TimingSummary } from "./ProgressSteps";
 import { OperationError } from "./OperationError";
@@ -48,17 +48,14 @@ export function FileDetails({ fileId, onChanged, onClose }: { fileId: string; on
 
   async function remove() {
     if (!confirm("Delete this file and its stored encrypted objects?")) return;
-    const manifest = await downloadManifest(fileId).catch(() => null);
-    if (manifest) {
-      const endpoints = new Map(manifest.objects.flatMap((item) => item.endpoint ? [[item.nodeId, item.endpoint] as const] : []));
-      const storage = createStorageTransport(endpoints.size > 0 ? "http" : "mock", endpoints);
-      await mapBounded(manifest.objects, async (item) => {
-        await storage.deleteShard(item.nodeId, item.objectId).catch(() => {});
-      }, { concurrency: DEFAULT_OPERATION_CONCURRENCY });
+    setError(undefined);
+    try {
+      await deleteFile(fileId);
+      setFile(await getFile(fileId));
+      onChanged();
+    } catch (cause) {
+      setError(describeError(cause, "Could not start deletion"));
     }
-    await deleteFile(fileId);
-    onClose();
-    onChanged();
   }
 
   return (
@@ -79,7 +76,7 @@ export function FileDetails({ fileId, onChanged, onClose }: { fileId: string; on
           <details className="advanced-details"><summary>Advanced details</summary><p>Compression: {file.compressionAlgorithm} · Ciphertext: {formatBytes(file.encryptedSize)} · Client-side authenticated encryption</p><TimingSummary detail={timing} /></details>
           {stage && <ProgressSteps current={stage} flow="download" />}
           {error && <OperationError error={error} />}
-          <div className="actions"><button className="primary" disabled={file.status !== "available" || Boolean(stage)} onClick={download}>Download</button><button className="danger" disabled={Boolean(stage)} onClick={remove}>Delete file</button></div>
+          <div className="actions"><button className="primary" disabled={file.status !== "available" || Boolean(stage)} onClick={download}>Download</button><button className="danger" disabled={file.status === "deleting" || Boolean(stage)} onClick={remove}>Delete file</button></div>
         </>
       )}
       {!file && error && <OperationError error={error} />}

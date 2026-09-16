@@ -76,3 +76,63 @@ describe("upload completion races", () => {
     expect(database.session.status).toBe("aborted");
   });
 });
+
+class DeletionDatabase {
+  file = { ...row, id: "file-delete", owner_user_id: "user-a", status: "available" as const, deletion_state: null as "pending" | null };
+  readonly batches: Array<Array<{ query: string; bindings: unknown[] }>> = [];
+
+  constructor(private readonly fail = false) {}
+
+  prepare(query: string) {
+    const database = this; let bindings: unknown[] = [];
+    const statement = {
+      query,
+      bind(...values: unknown[]) { bindings = values; return statement; },
+      get bindings() { return bindings; },
+      async first() {
+        if (query.includes("FROM files")) return { ...database.file };
+        if (query.startsWith("SELECT COUNT")) return { count: 2 };
+        return null;
+      },
+      async all() {
+        if (query.startsWith("SELECT sl.id source_id")) return { results: [
+          { source_id: "location-a", object_kind: "shard", device_id: "node-a", object_id: "file-delete/shard/a" },
+          { source_id: "share-a", object_kind: "key-share", device_id: "node-b", object_id: "file-delete/share/a" },
+        ] };
+        return { results: [] };
+      },
+      async run() { return { meta: { changes: 1 } }; },
+    };
+    return statement as unknown as D1PreparedStatement;
+  }
+
+  async batch(statements: D1PreparedStatement[]) {
+    const recorded = statements as unknown as Array<{ query: string; bindings: unknown[] }>;
+    this.batches.push(recorded.map((statement) => ({ query: statement.query, bindings: statement.bindings })));
+    if (this.fail) throw new Error("D1 unavailable");
+    this.file.deletion_state = "pending";
+    return [];
+  }
+}
+
+describe("durable deletion initiation", () => {
+  test("creates every deletion task in the same atomic batch as the deleting transition", async () => {
+    const database = new DeletionDatabase(); const env: Env = { DB: database as unknown as D1Database, JWT_SECRET: "test-secret-that-is-long-and-random", WEB_ORIGIN: "http://localhost:5173" };
+    const token = await issueAccessToken("user-a", "owner@example.com", env.JWT_SECRET);
+    const response = await app.request("http://api/files/file-delete", { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }, env);
+    expect(response.status).toBe(202);
+    expect(database.file.deletion_state).toBe("pending");
+    const batch = database.batches[0]!;
+    expect(batch).toHaveLength(3);
+    expect(batch[0]!.query).toStartWith("UPDATE files SET deletion_state='pending'");
+    expect(batch.slice(1).every((statement) => statement.query.startsWith("INSERT INTO file_deletion_tasks"))).toBeTrue();
+  });
+
+  test("does not expose a deleting state when atomic task creation fails", async () => {
+    const database = new DeletionDatabase(true); const env: Env = { DB: database as unknown as D1Database, JWT_SECRET: "test-secret-that-is-long-and-random", WEB_ORIGIN: "http://localhost:5173" };
+    const token = await issueAccessToken("user-a", "owner@example.com", env.JWT_SECRET);
+    const response = await app.request("http://api/files/file-delete", { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }, env);
+    expect(response.status).toBe(503);
+    expect(database.file.deletion_state).toBeNull();
+  });
+});
