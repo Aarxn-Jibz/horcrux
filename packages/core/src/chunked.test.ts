@@ -59,6 +59,19 @@ describe("v2 chunked file format", () => {
     await expect(instance.downloadTo(manifest, () => {})).rejects.toThrow("Insufficient Shamir shares");
   }, 120_000);
 
+  test("rolls back shard uploads when a sibling stream fails", async () => {
+    const storage = new FailingChunkedTransport(nodes, "b");
+    const instance = pipeline(storage);
+    await expect(instance.upload({ fileId: crypto.randomUUID(), name: "rollback.bin", mimeType: "application/octet-stream", size: 1, source: source(new Uint8Array([1])) }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes)).rejects.toThrow("simulated upload failure");
+    expect(storage.objectCount).toBe(0);
+  });
+
+  test("cancels sibling shard streams when one fails before reading", async () => {
+    const storage = new AbortingChunkedTransport(nodes, "b");
+    await expect(pipeline(storage).upload({ fileId: crypto.randomUUID(), name: "cancel.bin", mimeType: "application/octet-stream", size: 1, source: source(new Uint8Array([1])) }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes)).rejects.toThrow("simulated upload failure");
+    expect(storage.activeUploads).toBe(0);
+  });
+
   test("processes a 32 MiB generated source as 32 bounded frames", async () => {
     const storage = new MemoryShardTransport(nodes); const input = generated(32 * CHUNKED_PLAINTEXT_BYTES); const instance = pipeline(storage);
     const manifest = await instance.upload({ fileId: crypto.randomUUID(), name: "large.bin", mimeType: "application/octet-stream", size: input.byteLength, source: source(input, 131_071) }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes);
@@ -84,5 +97,32 @@ class TruncatingTransport extends MemoryShardTransport {
         throw new Error("simulated selected shard connection loss");
       }
     })();
+  }
+}
+
+class FailingChunkedTransport extends MemoryShardTransport {
+  private stored!: () => void;
+  private readonly firstStored = new Promise<void>((resolve) => { this.stored = resolve; });
+  constructor(nodes: readonly string[], private readonly failNode: string) { super(nodes); }
+  override async putShardStream(nodeId: string, objectId: string, bytes: AsyncIterable<Uint8Array>, options: { checksum?: string; maxSize: number }) {
+    if (nodeId === this.failNode) {
+      await bytes[Symbol.asyncIterator]().next();
+      await this.firstStored;
+      throw new Error("simulated upload failure");
+    }
+    const stored = await super.putShardStream(nodeId, objectId, bytes, options);
+    this.stored();
+    return stored;
+  }
+}
+
+class AbortingChunkedTransport extends MemoryShardTransport {
+  activeUploads = 0;
+  constructor(nodes: readonly string[], private readonly failNode: string) { super(nodes); }
+  override async putShardStream(nodeId: string, objectId: string, bytes: AsyncIterable<Uint8Array>, options: { checksum?: string; maxSize: number }) {
+    if (nodeId === this.failNode) throw new Error("simulated upload failure");
+    this.activeUploads += 1;
+    try { return await super.putShardStream(nodeId, objectId, bytes, options); }
+    finally { this.activeUploads -= 1; }
   }
 }

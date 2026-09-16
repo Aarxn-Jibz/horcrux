@@ -38,18 +38,24 @@ export class ChunkedFilePipeline {
     const objects: ObjectPlacement[] = [];
     try {
       const fanout = new StripeFanout(this.stripes(input, config, streamKey, noncePrefix), config.dataShards + config.parityShards);
-      const shardResults = await Promise.all(Array.from({ length: config.dataShards + config.parityShards }, async (_, index) => {
+      const shardUploads = Array.from({ length: config.dataShards + config.parityShards }, async (_, index) => {
         const objectId = `${input.fileId}/shard/${crypto.randomUUID()}`;
         const stored = await this.storage.putShardStream!(nodeIds[index]!, objectId, fanout.stream(index), { maxSize: shardMaximumSize(input.size, config.dataShards) });
-        return { id: crypto.randomUUID(), kind: "shard" as const, index, nodeId: nodeIds[index]!, objectId, size: stored.size, checksum: stored.checksum, shardType: index < config.dataShards ? "data" as const : "parity" as const, status: "stored" as const };
-      }));
-      objects.push(...shardResults);
-      const shareResults = await Promise.all(shares.map(async (share, index) => {
+        const object = { id: crypto.randomUUID(), kind: "shard" as const, index, nodeId: nodeIds[index]!, objectId, size: stored.size, checksum: stored.checksum, shardType: index < config.dataShards ? "data" as const : "parity" as const, status: "stored" as const };
+        objects.push(object);
+        return object;
+      });
+      try { await Promise.all(shardUploads); }
+      catch (error) { fanout.abort(error); await Promise.allSettled(shardUploads); throw error; }
+      const shareUploads = shares.map(async (share, index) => {
         const objectId = `${input.fileId}/key-share/${crypto.randomUUID()}`; const checksum = new Sha256Stream().update(share).hex();
         const stored = await this.storage.putShard(nodeIds[index]!, objectId, share, { checksum });
-        return { id: crypto.randomUUID(), kind: "key-share" as const, index, nodeId: nodeIds[index]!, objectId, size: stored.size, checksum, status: "stored" as const };
-      }));
-      objects.push(...shareResults);
+        const object = { id: crypto.randomUUID(), kind: "key-share" as const, index, nodeId: nodeIds[index]!, objectId, size: stored.size, checksum, status: "stored" as const };
+        objects.push(object);
+        return object;
+      });
+      try { await Promise.all(shareUploads); }
+      catch (error) { await Promise.allSettled(shareUploads); throw error; }
     } catch (error) {
       await Promise.all(objects.map((object) => this.storage.deleteShard(object.nodeId, object.objectId).catch(() => {})));
       throw error;
@@ -148,19 +154,22 @@ export class ChunkedFilePipeline {
 
 /** One generated stripe is retained only until all five PUT streams have consumed it. */
 class StripeFanout {
-  private current?: Uint8Array[]; private complete = false; private readonly taken = new Set<number>(); private producing?: Promise<void>;
+  private current?: Uint8Array[]; private complete = false; private aborted = false; private failure: unknown; private readonly taken = new Set<number>(); private producing?: Promise<void>;
   constructor(private readonly source: AsyncIterator<Uint8Array[]>, private readonly consumers: number) {}
   async *stream(index: number): AsyncGenerator<Uint8Array> { while (true) { const stripe = await this.take(index); if (!stripe) return; yield stripe; } }
+  abort(error: unknown) { if (this.aborted) return; this.aborted = true; this.failure = error; this.current = undefined; void this.source.return?.().catch(() => {}); }
   private async take(index: number): Promise<Uint8Array | undefined> {
-    while (this.current && this.taken.has(index)) await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    if (this.aborted) throw this.failure;
+    while (this.current && this.taken.has(index)) { await new Promise<void>((resolve) => setTimeout(resolve, 0)); if (this.aborted) throw this.failure; }
     if (!this.current && !this.complete) await this.produce();
+    if (this.aborted) throw this.failure;
     if (!this.current) return undefined;
     const stripe = this.current[index]!; this.taken.add(index);
     if (this.taken.size === this.consumers) { this.current = undefined; this.taken.clear(); }
     return stripe;
   }
   private async produce() {
-    if (!this.producing) this.producing = (async () => { const next = await this.source.next(); if (next.done) this.complete = true; else this.current = next.value; this.producing = undefined; })();
+    if (!this.producing) this.producing = (async () => { const next = await this.source.next(); if (this.aborted || next.done) this.complete = true; else this.current = next.value; this.producing = undefined; })();
     await this.producing;
   }
 }
