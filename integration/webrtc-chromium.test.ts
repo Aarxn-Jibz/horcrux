@@ -11,7 +11,7 @@ type Process = ReturnType<typeof Bun.spawn>;
 type Node = { endpoint: string; directory: string; process: Process; id?: string };
 type Session = { accessToken: string };
 
-const CHROMIUM = process.env.HORCRUX_CHROMIUM ?? "/home/aaron/.cloakbrowser/chromium-146.0.7680.177.5/chrome";
+const CHROMIUM = process.env.HORCRUX_CHROMIUM ?? "/usr/bin/chromium";
 const GO_CACHE = join(process.cwd(), ".integration-cache", "go-build");
 const GO_MODULE_CACHE = join(process.cwd(), ".integration-cache", "go-mod");
 let buildTempRoot = "";
@@ -80,7 +80,7 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
     nodes = await Promise.all(ports.map(async (port, index) => {
       const challenge = await request<{ challengeId: string; token: string }>("/devices/enrollment-challenges", { method: "POST" });
       const directory = join(root, `node-${index + 1}`);
-      const child = Bun.spawn([binary, "--data-dir", directory, "--listen", `127.0.0.1:${port}`, "--advertise-url", `http://127.0.0.1:${port}`, "--control-plane-public-key", publicKey, "--control-plane-url", apiUrl, "--enrollment-challenge", challenge.challengeId, "--node-name", `webrtc-node-${index + 1}`, "--web-origin", webUrl], { env: { ...process.env, HORCRUX_ENROLLMENT_TOKEN: challenge.token, HORCRUX_WEBRTC_DEBUG: "1" }, stdout: "inherit", stderr: "inherit" });
+      const child = Bun.spawn([binary, "--data-dir", directory, "--listen", `127.0.0.1:${port}`, "--advertise-url", `http://127.0.0.1:${port}`, "--control-plane-public-key", publicKey, "--control-plane-url", apiUrl, "--enrollment-challenge", challenge.challengeId, "--node-name", `webrtc-node-${index + 1}`, "--web-origin", webUrl], { env: { ...process.env, HORCRUX_ENROLLMENT_TOKEN: challenge.token }, stdout: "inherit", stderr: "inherit" });
       const endpoint = `http://127.0.0.1:${port}`;
       await waitFor(() => fetch(`${endpoint}/health`).then((response) => response.ok).catch(() => false), `node ${index + 1}`);
       console.log(`webrtc e2e: node ${index + 1} listening`);
@@ -95,7 +95,7 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
     console.log("webrtc e2e: launching Chromium");
     // Pion is not a browser mDNS resolver; expose loopback host candidates for
     // this direct local integration path rather than relying on a TURN relay.
-    browser = await chromium.launch({ executablePath: CHROMIUM, headless: true, args: ["--no-sandbox", "--disable-features=WebRtcHideLocalIpsWithMdns"] });
+    browser = await chromium.launch({ executablePath: CHROMIUM, headless: true, args: ["--no-sandbox", "--disable-features=WebRtcHideLocalIpsWithMdns", "--force-webrtc-ip-handling-policy=default"] });
     } catch (error) {
       await cleanup();
       throw error;
@@ -109,7 +109,7 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
   test("streams a multi-chunk opaque object over a real browser DataChannel and reads it back", async () => {
     console.log("webrtc e2e: running DataChannel transfer");
     const page = await browser!.newPage();
-    page.on("console", (message) => console.log(`chromium: ${message.text()}`));
+    if (process.env.HORCRUX_WEBRTC_DEBUG === "1") page.on("console", (message) => console.log(`chromium: ${message.text()}`));
     console.log("webrtc e2e: navigating Chromium");
     await page.goto(webUrl, { waitUntil: "domcontentloaded", timeout: 5_000 });
     console.log("webrtc e2e: Chromium origin ready");
@@ -130,11 +130,11 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
         return response.json() as Promise<T>;
       };
       const peers: RTCPeerConnection[] = [];
-      const waitForChannelOpen = (channel: RTCDataChannel, nodeId: string) => new Promise<void>((resolve, reject) => {
+      const waitForChannelOpen = (peer: RTCPeerConnection, channel: RTCDataChannel, nodeId: string) => new Promise<void>((resolve, reject) => {
         const finish = (callback: () => void) => { clearTimeout(timer); channel.removeEventListener("open", open); channel.removeEventListener("error", fail); channel.removeEventListener("close", fail); callback(); };
         const open = () => { console.log(`channel open ${nodeId}`); finish(resolve); };
         const fail = () => finish(() => reject(new Error(`DataChannel failed to open for ${nodeId}`)));
-        const timer = setTimeout(() => finish(() => reject(new Error(`DataChannel open timed out for ${nodeId}`))), 30_000);
+        const timer = setTimeout(() => { const candidates = (description: RTCSessionDescription | null) => description?.sdp.match(/^a=candidate:/gm)?.length ?? 0; finish(() => reject(new Error(`DataChannel open timed out for ${nodeId}: channel=${channel.readyState} connection=${peer.connectionState} ice=${peer.iceConnectionState} gathering=${peer.iceGatheringState} local=${peer.localDescription?.type ?? "none"}/${candidates(peer.localDescription)} remote=${peer.remoteDescription?.type ?? "none"}/${candidates(peer.remoteDescription)}`))); }, 30_000);
         channel.addEventListener("open", open, { once: true }); channel.addEventListener("error", fail, { once: true }); channel.addEventListener("close", fail, { once: true });
       });
       const connect = async (nodeId: string) => {
@@ -148,9 +148,10 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
         peer.onicecandidate = ({ candidate }) => console.log(`local ICE candidate ${nodeId}: ${candidate?.candidate ?? "end-of-candidates"}`);
         channel.onclosing = () => console.log(`channel closing ${nodeId}`);
         channel.onclose = () => console.log(`channel closed ${nodeId}`);
-        const opened = waitForChannelOpen(channel, nodeId);
+        const opened = waitForChannelOpen(peer, channel, nodeId);
         const offer = await peer.createOffer(); await peer.setLocalDescription(offer);
         if (peer.iceGatheringState !== "complete") await new Promise<void>((resolve) => peer.addEventListener("icegatheringstatechange", () => { if (peer.iceGatheringState === "complete") resolve(); }, { once: false }));
+        if (!peer.localDescription?.sdp.includes("a=candidate:")) throw new Error(`Browser produced no local ICE candidates for ${nodeId}`);
         console.log(`offer SDP ${nodeId}: ${peer.localDescription!.sdp}`);
         await request(`/webrtc/sessions/${session.sessionId}/signals`, { nodeId, type: "offer", payload: peer.localDescription!.sdp });
         console.log(`offer posted for ${nodeId}`);

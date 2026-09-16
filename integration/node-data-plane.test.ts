@@ -24,8 +24,11 @@ describe("local browser-control-node data path", () => {
     const controlKeys = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
     capabilityPrivateKey = encodeBase64Url(new Uint8Array(await crypto.subtle.exportKey("pkcs8", controlKeys.privateKey)));
     const capabilityPublicKey = encodeBase64Url(new Uint8Array(await crypto.subtle.exportKey("raw", controlKeys.publicKey)));
+    const binary = join(dataDirectory, "horcrux-node");
+    const build = Bun.spawn(["go", "build", "-o", binary, "./apps/node/cmd/horcrux-node"], { cwd: join(import.meta.dir, ".."), env: { ...process.env, GOCACHE: "/tmp/horcrux-go-cache", GOMODCACHE: "/tmp/horcrux-go-mod" }, stdout: "pipe", stderr: "pipe" });
+    if ((await build.exited) !== 0) throw new Error(`Go node build failed: ${await new Response(build.stderr).text()}`);
     nodeProcess = Bun.spawn([
-      "go", "run", "./apps/node/cmd/horcrux-node",
+      binary,
       "--data-dir", dataDirectory,
       "--listen", `127.0.0.1:${port}`,
       "--control-plane-public-key", capabilityPublicKey,
@@ -119,5 +122,8 @@ async function waitForNode(endpoint: string, process: ReturnType<typeof Bun.spaw
     if (await fetch(`${endpoint}/health`).then((response) => response.ok).catch(() => false)) return;
     await Bun.sleep(100);
   }
-  throw new Error("Go node did not become healthy");
+  process.kill();
+  const exit = await process.exited;
+  const [output, error] = await Promise.all([new Response(process.stdout).text(), new Response(process.stderr).text()]);
+  throw new Error(`Go node did not become healthy (exit ${exit}): ${output}${error}`);
 }
