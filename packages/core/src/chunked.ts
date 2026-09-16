@@ -65,42 +65,65 @@ export class ChunkedFilePipeline {
 
   /** Reconstructs v2 directly to a consumer; no complete plaintext or shard is accumulated. */
   async downloadTo(manifest: ChunkedManifest, output: ReconstructionOutput) {
-    if (!this.storage.getShardStream) throw new Error("Selected storage transport does not support chunked downloads");
-    const shares = await this.retrieveShares(manifest);
-    let key: Uint8Array;
-    try { key = await this.secrets.combineShares(shares.slice(0, manifest.keyShareThreshold)); } finally { shares.forEach((share) => share.fill(0)); }
-    const available = await Promise.all(manifest.objects.filter((object) => object.kind === "shard").map(async (object) => ({ object, healthy: await this.storage.healthCheck(object.nodeId) })));
-    let selected = available.filter((candidate) => candidate.healthy).slice(0, manifest.dataShards).map((candidate) => candidate.object);
-    if (selected.length < manifest.dataShards) { key.fill(0); throw new Error(`Insufficient reachable Reed-Solomon shards: need ${manifest.dataShards}, received ${selected.length}`); }
-    const readers = await Promise.all(selected.map(async (object) => this.openReader(object)));
-    const prefix = base64UrlToBytes(manifest.noncePrefix); const originalHash = new Sha256Stream(); let written = 0;
+    let key: Uint8Array | undefined;
+    let readers: RecordReader[] = [];
+    let selected: ObjectPlacement[] = [];
     try {
-      for (let index = 0; index < manifest.chunkCount; index += 1) {
-        const records: Awaited<ReturnType<RecordReader["next"]>>[] = [];
-        for (let readerIndex = 0; readerIndex < readers.length; readerIndex += 1) {
-          const reader = readers[readerIndex]!;
-          const recordStart = reader.offset;
-          try { records.push(await reader.next()); }
-          catch (error) {
-            const replacement = await this.replaceReader(manifest, available, selected, readers, readerIndex, recordStart);
-            if (!replacement) throw new Error(`Unable to replace failed shard stream at frame ${index}: ${error instanceof Error ? error.message : "unknown stream failure"}`);
-            selected = replacement.selected;
-            readers[readerIndex] = replacement.reader;
-            records.push(await replacement.reader.next());
+      if (!this.storage.getShardStream) throw new Error("Selected storage transport does not support chunked downloads");
+      const shares = await this.retrieveShares(manifest);
+      try { key = await this.secrets.combineShares(shares.slice(0, manifest.keyShareThreshold)); } finally { shares.forEach((share) => share.fill(0)); }
+      const available = (await Promise.all(manifest.objects.filter((object) => object.kind === "shard").map(async (object) => ({ object, healthy: await this.storage.healthCheck(object.nodeId) })))).filter((candidate) => candidate.healthy).map((candidate) => candidate.object);
+      if (available.length < manifest.dataShards) throw new Error(`Insufficient reachable Reed-Solomon shards: need ${manifest.dataShards}, received ${available.length}`);
+      const prefix = base64UrlToBytes(manifest.noncePrefix); const originalHash = new Sha256Stream(); let written = 0;
+
+      const readFrame = async (frame: number, frameStart: number) => {
+        let failure: unknown;
+        const attempt = async (objects: ObjectPlacement[], activeReaders: RecordReader[]) => {
+          const records: Awaited<ReturnType<RecordReader["next"]>>[] = [];
+          let encrypted: Uint8Array | undefined;
+          try {
+            for (const reader of activeReaders) records.push(await reader.next());
+            if (records.some((record) => record.index !== frame || record.originalLength < 0 || record.encryptedLength < 16)) throw new Error("Invalid or reordered striped record");
+            const first = records[0]!;
+            if (records.some((record) => record.originalLength !== first.originalLength || record.encryptedLength !== first.encryptedLength || record.shardSize !== first.shardSize)) throw new Error("Striped record metadata disagrees between nodes");
+            const shards: Array<Uint8Array | null> = Array(manifest.dataShards + manifest.parityShards).fill(null);
+            objects.forEach((object, index) => { shards[object.index] = records[index]!.piece; });
+            const directData = Array.from({ length: manifest.dataShards }, (_, index) => shards[index]).every(Boolean);
+            encrypted = directData ? concatBytes(shards.slice(0, manifest.dataShards) as Uint8Array[], first.encryptedLength) : await this.erasure.decode(shards, manifest.dataShards, manifest.parityShards, first.encryptedLength);
+            const compressed = await decryptFrame(key!, prefix, manifest.fileId, manifest.originalSize, frame, first.originalLength, encrypted);
+            encrypted.fill(0); encrypted = undefined;
+            try {
+              const plaintext = await this.compression.decompress(compressed);
+              if (plaintext.byteLength !== first.originalLength) { plaintext.fill(0); throw new Error("Chunk decompression length does not match authenticated frame metadata"); }
+              return plaintext;
+            } finally { compressed.fill(0); }
+          } finally {
+            encrypted?.fill(0);
+            records.forEach((record) => record.piece.fill(0));
           }
+        };
+
+        if (readers.length) {
+          try { return await attempt(selected, readers); }
+          catch (error) { failure = error; await this.closeReaders(readers); readers = []; selected = []; }
         }
-        if (records.some((record) => record.index !== index || record.originalLength < 0 || record.encryptedLength < 16)) throw new Error("Invalid or reordered striped record");
-        const first = records[0]!; if (records.some((record) => record.originalLength !== first.originalLength || record.encryptedLength !== first.encryptedLength || record.shardSize !== first.shardSize)) throw new Error("Striped record metadata disagrees between nodes");
-        const shards: Array<Uint8Array | null> = Array(manifest.dataShards + manifest.parityShards).fill(null);
-        selected.forEach((object, selectedIndex) => { shards[object.index] = records[selectedIndex]!.piece; });
-        const directData = Array.from({ length: manifest.dataShards }, (_, shardIndex) => shards[shardIndex]).every(Boolean);
-        const encrypted = directData ? concatBytes(shards.slice(0, manifest.dataShards) as Uint8Array[], first.encryptedLength) : await this.erasure.decode(shards, manifest.dataShards, manifest.parityShards, first.encryptedLength);
-        const compressed = await decryptFrame(key, prefix, manifest.fileId, manifest.originalSize, index, first.originalLength, encrypted); encrypted.fill(0);
-        const plaintext = await this.compression.decompress(compressed); compressed.fill(0);
-        if (plaintext.byteLength !== first.originalLength) { plaintext.fill(0); throw new Error("Chunk decompression length does not match authenticated frame metadata"); }
-        written += plaintext.byteLength; originalHash.update(plaintext);
-        if (isFileSink(output)) await output.write(plaintext); else await output(plaintext);
-        plaintext.fill(0);
+        for (const objects of combinations(available, manifest.dataShards)) {
+          let candidateReaders: RecordReader[] = [];
+          try {
+            candidateReaders = await this.openReaders(objects, frameStart);
+            const plaintext = await attempt(objects, candidateReaders);
+            readers = candidateReaders; selected = objects;
+            return plaintext;
+          } catch (error) { failure = error; await this.closeReaders(candidateReaders); }
+        }
+        const detail = failure instanceof Error ? failure.message : "no valid shard combination";
+        throw new Error(`Unable to reconstruct frame ${frame}: ${detail}`);
+      };
+
+      for (let index = 0; index < manifest.chunkCount; index += 1) {
+        const plaintext = await readFrame(index, readers[0]?.offset ?? 0);
+        try { written += plaintext.byteLength; originalHash.update(plaintext); if (isFileSink(output)) await output.write(plaintext); else await output(plaintext); }
+        finally { plaintext.fill(0); }
       }
       await Promise.all(readers.map((reader) => reader.finish()));
       if (written !== manifest.originalSize || originalHash.hex() !== manifest.plaintextHash) throw new Error("Restored file failed integrity verification");
@@ -108,7 +131,7 @@ export class ChunkedFilePipeline {
     } catch (error) {
       if (isFileSink(output)) await output.abort(error).catch(() => {});
       throw error;
-    } finally { key.fill(0); }
+    } finally { await this.closeReaders(readers); key?.fill(0); }
   }
 
   private async retrieveShares(manifest: ChunkedManifest) {
@@ -123,19 +146,13 @@ export class ChunkedFilePipeline {
     return new RecordReader(await this.storage.getShardStream!(object.nodeId, object.objectId, undefined, start), start === 0 ? object.checksum : undefined, start);
   }
 
-  private async replaceReader(manifest: ChunkedManifest, available: Array<{ object: ObjectPlacement; healthy: boolean }>, selected: ObjectPlacement[], readers: RecordReader[], readerIndex: number, offset: number) {
-    const activeIndexes = new Set(selected.map((item) => item.index));
-    for (const candidate of available) {
-      if (!candidate.healthy || activeIndexes.has(candidate.object.index)) continue;
-      try {
-        const reader = await this.openReader(candidate.object, offset);
-        const updated = selected.slice(); updated[readerIndex] = candidate.object;
-        return { selected: updated, reader };
-      } catch { /* a stale heartbeat must not prevent trying another shard */ }
-    }
-    return undefined;
+  private async openReaders(objects: ObjectPlacement[], start: number) {
+    const readers: RecordReader[] = [];
+    try { for (const object of objects) readers.push(await this.openReader(object, start)); return readers; }
+    catch (error) { await this.closeReaders(readers); throw error; }
   }
 
+  private async closeReaders(readers: RecordReader[]) { await Promise.allSettled(readers.map((reader) => reader.cancel())); }
 
   private async *stripes(input: ChunkedUploadInput, config: ChunkedConfig, key: Uint8Array, noncePrefix: Uint8Array): AsyncGenerator<Uint8Array[]> {
     let index = 0;
@@ -179,7 +196,7 @@ async function decryptFrame(key: Uint8Array, prefix: Uint8Array, fileId: string,
 }
 
 class RecordReader {
-  private readonly iterator: AsyncIterator<Uint8Array>; private pending: Uint8Array<ArrayBufferLike> = new Uint8Array(0); private readonly hash = new Sha256Stream();
+  private readonly iterator: AsyncIterator<Uint8Array>; private pending: Uint8Array<ArrayBufferLike> = new Uint8Array(0); private readonly hash = new Sha256Stream(); private cancelled = false;
   constructor(source: ByteStream, private readonly checksum?: string, readonly start = 0) { this.iterator = source[Symbol.asyncIterator](); this.offset = start; }
   offset: number;
   async next() {
@@ -187,7 +204,13 @@ class RecordReader {
     const view = new DataView(header.buffer, header.byteOffset, header.byteLength); const index = view.getUint32(4); const originalLength = view.getUint32(8); const encryptedLength = view.getUint32(12); const shardSize = view.getUint32(16); return { index, originalLength, encryptedLength, shardSize, piece: await this.read(shardSize) };
   }
   async finish() { let extra = await this.iterator.next(); while (!extra.done) { if (extra.value.byteLength) throw new Error("Stored shard has bytes after its final record"); this.hash.update(extra.value); extra = await this.iterator.next(); } if (this.pending.byteLength || (this.checksum && this.hash.hex() !== this.checksum)) throw new Error("Stored shard checksum failed integrity verification"); }
-  private async read(length: number) { while (this.pending.byteLength < length) { const next = await this.iterator.next(); if (next.done) throw new Error("Stored shard ended before record boundary"); this.hash.update(next.value); this.pending = this.pending.byteLength ? concatBytes([this.pending, next.value]) : next.value; } const result = this.pending.slice(0, length); this.pending = this.pending.slice(length); this.offset += length; return result; }
+  async cancel() { if (this.cancelled) return; this.cancelled = true; this.pending.fill(0); this.pending = new Uint8Array(0); await this.iterator.return?.(); }
+  private async read(length: number) { if (this.cancelled) throw new Error("Stored shard reader was cancelled"); while (this.pending.byteLength < length) { const next = await this.iterator.next(); if (next.done) throw new Error("Stored shard ended before record boundary"); this.hash.update(next.value); this.pending = this.pending.byteLength ? concatBytes([this.pending, next.value]) : next.value; } const result = this.pending.slice(0, length); this.pending = this.pending.slice(length); this.offset += length; return result; }
+}
+
+function* combinations<T>(items: T[], count: number, start = 0, selected: T[] = []): Generator<T[]> {
+  if (selected.length === count) { yield selected; return; }
+  for (let index = start; index <= items.length - (count - selected.length); index += 1) yield* combinations(items, count, index + 1, [...selected, items[index]!]);
 }
 
 async function encryptFrame(_encryption: EncryptionProvider, key: Uint8Array, prefix: Uint8Array, fileId: string, originalSize: number, index: number, originalLength: number, compressed: Uint8Array) {

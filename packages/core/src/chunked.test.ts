@@ -44,6 +44,48 @@ describe("v2 chunked file format", () => {
     expect(new Sha256Stream().update(join(output)).hex()).toBe(new Sha256Stream().update(input).hex());
   }, 120_000);
 
+  test("opens an alternative combination when a healthy shard object is missing", async () => {
+    const storage = new MissingObjectOpenTransport(nodes); const input = generated(CHUNKED_PLAINTEXT_BYTES + 9); const instance = pipeline(storage);
+    const manifest = await instance.upload({ fileId: crypto.randomUUID(), name: "missing.bin", mimeType: "application/octet-stream", size: input.byteLength, source: source(input) }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes);
+    const missing = manifest.objects.find((object) => object.kind === "shard" && object.index === 0)!;
+    storage.missingObjectId = missing.objectId; storage.deleteObject(missing.nodeId, missing.objectId);
+    const output: Uint8Array[] = []; await instance.downloadTo(manifest, (chunk) => { output.push(chunk.slice()); });
+    expect(join(output)).toEqual(input);
+  }, 120_000);
+
+  test("retries a valid-header ciphertext corruption with another shard combination", async () => {
+    const storage = new MemoryShardTransport(nodes); const input = generated(CHUNKED_PLAINTEXT_BYTES + 9); const instance = pipeline(storage);
+    const manifest = await instance.upload({ fileId: crypto.randomUUID(), name: "ciphertext-corrupt.bin", mimeType: "application/octet-stream", size: input.byteLength, source: source(input) }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes);
+    await corruptPayload(storage, manifest, 0);
+    const output: Uint8Array[] = []; await instance.downloadTo(manifest, (chunk) => { output.push(chunk.slice()); });
+    expect(join(output)).toEqual(input);
+  }, 120_000);
+
+  test("continues after the first replacement stream also fails", async () => {
+    const storage = new OpenFailingTransport(nodes, new Set(["a", "b"])); const input = generated(CHUNKED_PLAINTEXT_BYTES + 9); const instance = pipeline(storage);
+    const manifest = await instance.upload({ fileId: crypto.randomUUID(), name: "replacement.bin", mimeType: "application/octet-stream", size: input.byteLength, source: source(input) }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes);
+    const output: Uint8Array[] = []; await instance.downloadTo(manifest, (chunk) => { output.push(chunk.slice()); });
+    expect(storage.failures).toBeGreaterThanOrEqual(2); expect(join(output)).toEqual(input);
+  }, 120_000);
+
+  test("recovers from two corrupt shards but fails deterministically with three", async () => {
+    const storage = new MemoryShardTransport(nodes); const input = generated(CHUNKED_PLAINTEXT_BYTES + 9); const instance = pipeline(storage);
+    const manifest = await instance.upload({ fileId: crypto.randomUUID(), name: "two-corrupt.bin", mimeType: "application/octet-stream", size: input.byteLength, source: source(input) }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes);
+    await corruptPayload(storage, manifest, 0); await corruptPayload(storage, manifest, 1);
+    const output: Uint8Array[] = []; await instance.downloadTo(manifest, (chunk) => { output.push(chunk.slice()); });
+    expect(join(output)).toEqual(input);
+    await corruptPayload(storage, manifest, 2);
+    await expect(instance.downloadTo(manifest, () => {})).rejects.toThrow("Unable to reconstruct frame 0");
+  }, 120_000);
+
+  test("aborts the sink when setup or reconstruction cannot recover", async () => {
+    const storage = new OpenFailingTransport(nodes, new Set(nodes)); const input = generated(CHUNKED_PLAINTEXT_BYTES + 9); const instance = pipeline(storage);
+    const manifest = await instance.upload({ fileId: crypto.randomUUID(), name: "abort.bin", mimeType: "application/octet-stream", size: input.byteLength, source: source(input) }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes);
+    let aborted = false;
+    await expect(instance.downloadTo(manifest, { write: async () => {}, close: async () => {}, abort: async () => { aborted = true; } })).rejects.toThrow("Unable to reconstruct frame 0");
+    expect(aborted).toBeTrue();
+  }, 120_000);
+
   test("closes a streaming sink after verified reconstruction", async () => {
     const storage = new MemoryShardTransport(nodes); const input = generated(CHUNKED_PLAINTEXT_BYTES + 7); const instance = pipeline(storage);
     const manifest = await instance.upload({ fileId: crypto.randomUUID(), name: "sink.bin", mimeType: "application/octet-stream", size: input.byteLength, source: source(input) }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes);
@@ -83,6 +125,18 @@ describe("v2 chunked file format", () => {
 
 function generated(size: number) { const bytes = new Uint8Array(size); for (let index = 0; index < size; index += 1) bytes[index] = (index * 17 + index >>> 8) & 0xff; return bytes; }
 function join(chunks: Uint8Array[]) { const size = chunks.reduce((total, chunk) => total + chunk.byteLength, 0); const bytes = new Uint8Array(size); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; } return bytes; }
+async function corruptPayload(storage: MemoryShardTransport, manifest: Awaited<ReturnType<ChunkedFilePipeline["upload"]>>, index: number) { const object = manifest.objects.find((item) => item.kind === "shard" && item.index === index)!; const bytes = await storage.getShard(object.nodeId, object.objectId); bytes[20] = bytes[20]! ^ 0xff; await storage.putShard(object.nodeId, object.objectId, bytes); }
+
+class OpenFailingTransport extends MemoryShardTransport {
+  failures = 0;
+  constructor(nodes: readonly string[], private readonly failingNodes: Set<string>) { super(nodes); }
+  override async getShardStream(nodeId: string, objectId: string, signal?: AbortSignal, start = 0) { if (this.failingNodes.has(nodeId)) { this.failures += 1; throw new Error("simulated stream open failure"); } return super.getShardStream(nodeId, objectId, signal, start); }
+}
+
+class MissingObjectOpenTransport extends MemoryShardTransport {
+  missingObjectId?: string;
+  override async getShardStream(nodeId: string, objectId: string, signal?: AbortSignal, start = 0) { if (objectId === this.missingObjectId) throw new Error("Shard not found"); return super.getShardStream(nodeId, objectId, signal, start); }
+}
 
 class TruncatingTransport extends MemoryShardTransport {
   resumed = false;
