@@ -19,20 +19,22 @@ import (
 )
 
 const ProtocolVersion = "1"
+const maxHeartbeatBodyBytes = 4096
+const maxDeletionErrorRunes = 120
 
 var ErrInvalidHeartbeat = errors.New("invalid node heartbeat")
 
 type Payload struct {
-	Version        string `json:"version"`
-	NodeID         string `json:"nodeId"`
-	Status         string `json:"status"`
-	CapacityBytes  int64  `json:"capacityBytes"`
-	UsedBytes      int64  `json:"usedBytes"`
-	AvailableBytes int64  `json:"availableBytes"`
-	NodeVersion    string `json:"nodeVersion"`
-	Endpoint       string `json:"endpoint"`
-	Timestamp      int64  `json:"timestamp"`
-	Features       []string          `json:"features,omitempty"`
+	Version         string           `json:"version"`
+	NodeID          string           `json:"nodeId"`
+	Status          string           `json:"status"`
+	CapacityBytes   int64            `json:"capacityBytes"`
+	UsedBytes       int64            `json:"usedBytes"`
+	AvailableBytes  int64            `json:"availableBytes"`
+	NodeVersion     string           `json:"nodeVersion"`
+	Endpoint        string           `json:"endpoint"`
+	Timestamp       int64            `json:"timestamp"`
+	Features        []string         `json:"features,omitempty"`
 	DeletionResults []DeletionResult `json:"deletionResults,omitempty"`
 }
 
@@ -101,16 +103,28 @@ func (reporter *Reporter) Report(ctx context.Context) error {
 		now = reporter.Now().UTC()
 	}
 	reporter.resultsMu.Lock()
-	results := append([]DeletionResult(nil), reporter.pendingResults...)
-	reporter.resultsMu.Unlock()
-	payload := Payload{Version: ProtocolVersion, NodeID: reporter.NodeID, Status: "online", CapacityBytes: stats.CapacityBytes, UsedBytes: stats.UsedBytes, AvailableBytes: stats.AvailableBytes, NodeVersion: reporter.NodeVersion, Endpoint: reporter.Endpoint, Timestamp: now.Unix(), Features: []string{"deletion-tasks-v1"}, DeletionResults: results}
-	token, err := Sign(payload, reporter.Signer)
-	if err != nil {
-		return err
+	results := make([]DeletionResult, len(reporter.pendingResults))
+	for index, pending := range reporter.pendingResults {
+		results[index] = pending
+		results[index].Error = boundedDeletionError(pending.Error)
 	}
-	body, err := json.Marshal(map[string]string{"heartbeat": token})
-	if err != nil {
-		return err
+	reporter.resultsMu.Unlock()
+	payload := Payload{Version: ProtocolVersion, NodeID: reporter.NodeID, Status: "online", CapacityBytes: stats.CapacityBytes, UsedBytes: stats.UsedBytes, AvailableBytes: stats.AvailableBytes, NodeVersion: reporter.NodeVersion, Endpoint: reporter.Endpoint, Timestamp: now.Unix(), Features: []string{"deletion-tasks-v1"}}
+	var body []byte
+	for {
+		payload.DeletionResults = results
+		token, signErr := Sign(payload, reporter.Signer)
+		if signErr != nil {
+			return signErr
+		}
+		body, err = json.Marshal(map[string]string{"heartbeat": token})
+		if err != nil {
+			return err
+		}
+		if len(body) <= maxHeartbeatBodyBytes || len(results) == 0 {
+			break
+		}
+		results = results[:len(results)-1]
 	}
 	endpoint := strings.TrimRight(reporter.ControlPlaneURL, "/") + "/nodes/" + url.PathEscape(reporter.NodeID) + "/heartbeat"
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
@@ -157,6 +171,14 @@ func (reporter *Reporter) Report(ctx context.Context) error {
 		reporter.resultsMu.Unlock()
 	}
 	return nil
+}
+
+func boundedDeletionError(value string) string {
+	runes := []rune(value)
+	if len(runes) <= maxDeletionErrorRunes {
+		return value
+	}
+	return string(runes[:maxDeletionErrorRunes-3]) + "..."
 }
 
 func Sign(payload Payload, signer receipt.PayloadSigner) (string, error) {

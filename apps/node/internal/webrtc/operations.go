@@ -22,6 +22,7 @@ type ObjectSession struct {
 	pipe       *io.PipeWriter
 	done       chan result
 	capability authorization.Capability
+	failure    error
 	written    int64
 	finished   bool
 	mu         sync.Mutex
@@ -37,7 +38,7 @@ func NewObjectSession(ctx context.Context, nodeID string, store *storage.Store, 
 func (s *ObjectSession) Begin(control Control) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.pipe != nil || control.Type != "put-init" || control.Capability == "" || control.ObjectID == "" {
+	if s.pipe != nil || s.finished || control.Type != "put-init" || control.Capability == "" || control.ObjectID == "" {
 		return fmt.Errorf("invalid put initialization")
 	}
 	capability, err := s.verifier.Verify(control.Capability, "PUT", control.ObjectID)
@@ -45,9 +46,23 @@ func (s *ObjectSession) Begin(control Control) error {
 		return err
 	}
 	reader, writer := io.Pipe()
+	operationDone := make(chan struct{})
+	done := make(chan result, 1)
 	s.pipe = writer
 	s.capability = capability
-	s.done = make(chan result, 1)
+	s.done = done
+	go func() {
+		select {
+		case <-s.ctx.Done():
+			s.mu.Lock()
+			if s.pipe == writer && s.failure == nil {
+				s.failure = s.ctx.Err()
+			}
+			s.mu.Unlock()
+			_ = writer.CloseWithError(s.ctx.Err())
+		case <-operationDone:
+		}
+	}()
 	go func() {
 		var metadata storage.Metadata
 		var err error
@@ -56,21 +71,42 @@ func (s *ObjectSession) Begin(control Control) error {
 		} else {
 			metadata, err = s.store.Put(s.ctx, control.ObjectID, reader, capability.Checksum, *capability.Size)
 		}
-		s.done <- result{metadata, err}
+		if err != nil {
+			s.mu.Lock()
+			if s.pipe == writer {
+				s.failure = err
+			}
+			s.mu.Unlock()
+			_ = writer.CloseWithError(err)
+		}
+		_ = reader.Close()
+		close(operationDone)
+		done <- result{metadata, err}
 	}()
 	return nil
 }
 func (s *ObjectSession) Write(chunk []byte) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.pipe == nil || s.finished || len(chunk) == 0 || len(chunk) > MaxChunkBytes {
+		s.mu.Unlock()
 		return fmt.Errorf("unexpected binary data")
 	}
 	s.written += int64(len(chunk))
 	if s.capability.MaxSize != nil && s.written > *s.capability.MaxSize {
+		s.mu.Unlock()
 		return fmt.Errorf("authorized size exceeded")
 	}
-	_, err := s.pipe.Write(chunk)
+	pipe := s.pipe
+	s.mu.Unlock()
+	_, err := pipe.Write(chunk)
+	if err != nil {
+		s.mu.Lock()
+		failure := s.failure
+		s.mu.Unlock()
+		if failure != nil {
+			return failure
+		}
+	}
 	return err
 }
 func (s *ObjectSession) Finish() (Control, error) {
@@ -97,6 +133,10 @@ func (s *ObjectSession) Abort() {
 	s.mu.Lock()
 	pipe := s.pipe
 	s.pipe = nil
+	s.finished = true
+	if s.failure == nil {
+		s.failure = fmt.Errorf("peer disconnected")
+	}
 	s.mu.Unlock()
 	if pipe != nil {
 		_ = pipe.CloseWithError(fmt.Errorf("peer disconnected"))
