@@ -4,6 +4,7 @@ import type { CapabilityRequest } from "@horcrux-file-system/storage";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8787";
 let accessToken: string | null = null;
+let refreshInFlight: Promise<User> | null = null;
 export interface User { id: string; email: string }
 
 async function request<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
@@ -17,7 +18,10 @@ export function authenticatedRequest<T>(path: string, init: RequestInit = {}) { 
 async function session(path: "/auth/login" | "/auth/register", email: string, password: string) { const result = await request<{ accessToken: string; user: User }>(path, { method: "POST", body: JSON.stringify({ email, password }) }, false); accessToken = result.accessToken; return result.user; }
 export const login = (email: string, password: string) => session("/auth/login", email, password);
 export const register = (email: string, password: string) => session("/auth/register", email, password);
-export async function refresh() { const result = await request<{ accessToken: string; user: User }>("/auth/refresh", { method: "POST" }, false); accessToken = result.accessToken; return result.user; }
+export function refresh() {
+  if (!refreshInFlight) refreshInFlight = request<{ accessToken: string; user: User }>("/auth/refresh", { method: "POST" }, false).then((result) => { accessToken = result.accessToken; return result.user; }).catch((error) => { accessToken = null; throw error; }).finally(() => { refreshInFlight = null; });
+  return refreshInFlight;
+}
 export async function logout() { await request<void>("/auth/logout", { method: "POST" }, false).catch(() => {}); accessToken = null; }
 export async function listFiles() { return (await request<{ files: FileSummary[] }>("/files")).files; }
 export async function listDevices() { return (await request<{ devices: StorageNodeContract[] }>("/devices")).devices; }

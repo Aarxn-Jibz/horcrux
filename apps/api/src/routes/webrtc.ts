@@ -23,14 +23,14 @@ router.post("/sessions", async (c) => {
 router.post("/sessions/:id/signals", async (c) => {
   const signal = webRtcSignalSchema.safeParse({ ...(await c.req.json().catch(() => null) as object), sessionId: c.req.param("id"), sender: "browser" });
   if (!signal.success) throw new ApiError(422, "validation_error", "Invalid WebRTC signal");
-  const session = await c.env.DB.prepare("SELECT device_id FROM webrtc_sessions WHERE id=? AND user_id=? AND expires_at>datetime('now')").bind(signal.data.sessionId, c.get("user").id).first<{ device_id: string }>();
+  const session = await c.env.DB.prepare("SELECT device_id FROM webrtc_sessions WHERE id=? AND user_id=? AND julianday(expires_at)>julianday('now')").bind(signal.data.sessionId, c.get("user").id).first<{ device_id: string }>();
   if (!session || session.device_id !== signal.data.nodeId) throw new ApiError(403, "signal_scope_invalid", "Signal session is not scoped to this node");
   await c.env.DB.prepare("INSERT INTO webrtc_signals (id,session_id,sender,signal_type,payload) VALUES (?,?,?,?,?)").bind(crypto.randomUUID(), signal.data.sessionId, "browser", signal.data.type, signal.data.payload).run();
   return c.json({ accepted: true });
 });
 
 router.get("/sessions/:id/signals", async (c) => {
-  const session = await c.env.DB.prepare("SELECT device_id FROM webrtc_sessions WHERE id=? AND user_id=? AND expires_at>datetime('now')").bind(c.req.param("id"), c.get("user").id).first<{ device_id: string }>();
+  const session = await c.env.DB.prepare("SELECT device_id FROM webrtc_sessions WHERE id=? AND user_id=? AND julianday(expires_at)>julianday('now')").bind(c.req.param("id"), c.get("user").id).first<{ device_id: string }>();
   if (!session) throw new ApiError(404, "signal_session_not_found", "WebRTC session is unavailable");
   const signals = await c.env.DB.prepare("SELECT signal_type type,payload FROM webrtc_signals WHERE session_id=? AND sender='node' ORDER BY created_at,id").bind(c.req.param("id")).all<{ type: "answer" | "ice-candidate"; payload: string }>();
   return c.json({ nodeId: session.device_id, signals: signals.results });

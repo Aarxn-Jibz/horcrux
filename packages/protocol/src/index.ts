@@ -82,4 +82,17 @@ export const webRtcSignalSchema = z.object({
 });
 export type WebRtcSignal = z.infer<typeof webRtcSignalSchema>;
 
-export const webRtcNodeAuthSchema = z.object({ version: z.literal(PROTOCOL_VERSION), nodeId: identifier, timestamp: z.int().nonnegative() });
+export const webRtcNodeAuthSchema = z.object({
+  version: z.literal(PROTOCOL_VERSION),
+  nodeId: identifier,
+  operation: z.enum(["sessions", "signals"]),
+  sessionId: z.uuid().optional(),
+  signalType: z.enum(["answer", "ice-candidate"]).optional(),
+  signalHash: checksum.optional(),
+  timestamp: z.int().nonnegative(),
+}).superRefine((value, context) => {
+  const hasSignal = value.signalType !== undefined || value.signalHash !== undefined;
+  if (value.operation === "sessions" && (value.sessionId !== undefined || hasSignal)) context.addIssue({ code: "custom", message: "Session discovery auth cannot include signal fields" });
+  if (value.operation === "signals" && !value.sessionId) context.addIssue({ code: "custom", message: "Signal auth requires a session" });
+  if (value.signalType === undefined !== (value.signalHash === undefined)) context.addIssue({ code: "custom", message: "Signal auth requires both type and digest" });
+});

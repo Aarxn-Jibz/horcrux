@@ -3,7 +3,9 @@ package webrtc
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,9 +16,13 @@ import (
 )
 
 type NodeAuth struct {
-	Version   string `json:"version"`
-	NodeID    string `json:"nodeId"`
-	Timestamp int64  `json:"timestamp"`
+	Version    string `json:"version"`
+	NodeID     string `json:"nodeId"`
+	Operation  string `json:"operation"`
+	SessionID  string `json:"sessionId,omitempty"`
+	SignalType string `json:"signalType,omitempty"`
+	SignalHash string `json:"signalHash,omitempty"`
+	Timestamp  int64  `json:"timestamp"`
 }
 type Signal struct {
 	Type    string `json:"type"`
@@ -29,7 +35,7 @@ type SignalingClient struct {
 }
 
 func (client *SignalingClient) Exchange(ctx context.Context, sessionID string, signal *Signal) ([]Signal, error) {
-	auth, err := client.auth()
+	auth, err := client.auth("signals", sessionID, signal)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +74,7 @@ func (client *SignalingClient) Exchange(ctx context.Context, sessionID string, s
 }
 
 func (client *SignalingClient) Sessions(ctx context.Context) ([]string, error) {
-	auth, err := client.auth()
+	auth, err := client.auth("sessions", "", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -96,8 +102,13 @@ func (client *SignalingClient) Sessions(ctx context.Context) ([]string, error) {
 	err = json.NewDecoder(response.Body).Decode(&decoded)
 	return decoded.Sessions, err
 }
-func (client *SignalingClient) auth() (string, error) {
-	payload, err := json.Marshal(NodeAuth{Version: "1", NodeID: client.NodeID, Timestamp: time.Now().Unix()})
+func (client *SignalingClient) auth(operation, sessionID string, signal *Signal) (string, error) {
+	auth := NodeAuth{Version: "1", NodeID: client.NodeID, Operation: operation, SessionID: sessionID, Timestamp: time.Now().Unix()}
+	if signal != nil {
+		digest := sha256.Sum256([]byte(signal.Payload))
+		auth.SignalType, auth.SignalHash = signal.Type, hex.EncodeToString(digest[:])
+	}
+	payload, err := json.Marshal(auth)
 	if err != nil {
 		return "", err
 	}
