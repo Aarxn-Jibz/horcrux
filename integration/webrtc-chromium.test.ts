@@ -167,7 +167,7 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
         }
         if (!peer.currentRemoteDescription) throw new Error("Pion answer timed out");
         await opened;
-        return channel;
+        return { channel, close: () => peer.close() };
       };
       const receipts: string[] = [];
       const transport = new WebRtcShardTransport(
@@ -207,7 +207,7 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
         await peer.setLocalDescription(await peer.createOffer()); if (peer.iceGatheringState !== "complete") await new Promise<void>((resolve) => peer.addEventListener("icegatheringstatechange", () => peer.iceGatheringState === "complete" && resolve()));
         console.log(`offer SDP ${target}: ${peer.localDescription!.sdp}`); await request(`/webrtc/sessions/${session.sessionId}/signals`, { nodeId: target, type: "offer", payload: peer.localDescription!.sdp }); const until = Date.now() + 30_000; let lastSignalProgress = Date.now();
         while (!peer.currentRemoteDescription && Date.now() < until) { if (Date.now() - lastSignalProgress >= 1_000) { console.log(`waiting for answer ${target}`); lastSignalProgress = Date.now(); } const signals = await request<{ signals: Array<{ type: "answer" | "ice-candidate"; payload: string }> }>(`/webrtc/sessions/${session.sessionId}/signals`, undefined, "GET"); for (const signal of signals.signals) { if (signal.type === "answer" && !peer.currentRemoteDescription) { console.log(`answer SDP ${target}: ${signal.payload}`); await peer.setRemoteDescription({ type: "answer", sdp: signal.payload }); } else if (signal.type === "ice-candidate") { console.log(`remote ICE candidate ${target}: ${signal.payload}`); await peer.addIceCandidate(JSON.parse(signal.payload)); } } if (!peer.currentRemoteDescription) await new Promise((resolve) => setTimeout(resolve, 100)); }
-        if (!peer.currentRemoteDescription) throw new Error("answer timed out"); await opened; return channel;
+        if (!peer.currentRemoteDescription) throw new Error("answer timed out"); await opened; return { channel, close: () => peer.close() };
       };
       const transport = new WebRtcShardTransport(connect, async (input: { nodeId: string; fileId: string; objectId: string; operation: "PUT" | "GET" | "DELETE" }) => (await request<{ capability: string }>(`/nodes/${input.nodeId}/capabilities`, input)).capability);
       const bytes = await transport.getShard(nodeId, objectId);

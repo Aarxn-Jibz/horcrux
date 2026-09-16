@@ -1,6 +1,7 @@
 import type { ByteStream, PutShardOptions, ShardTransport, StoredObjectRef } from "./index";
 
-type Connect = (nodeId: string) => Promise<RTCDataChannel>;
+export type WebRtcConnection = { channel: RTCDataChannel; close: () => void };
+type Connect = (nodeId: string) => Promise<WebRtcConnection>;
 type Grant = (request: { nodeId: string; fileId: string; objectId: string; operation: "PUT" | "GET" | "DELETE"; maxSize?: number }) => Promise<string>;
 type SubmitReceipt = (request: { nodeId: string; fileId: string; receipt: string }) => Promise<void>;
 type Control = { type: string; objectId?: string; size?: number; checksum?: string; capability?: string; message?: string };
@@ -17,17 +18,19 @@ export class WebRtcShardTransport implements ShardTransport {
   }
 
   async putShardStream(nodeId: string, objectId: string, stream: ByteStream, options: PutShardOptions & { maxSize: number }): Promise<StoredObjectRef> {
-    const channel = await this.connect(nodeId);
-    const receipt = waitForControl(channel, "receipt");
-    await sendControl(channel, { type: "put-init", objectId, capability: await this.grant({ nodeId, fileId: fileId(objectId), objectId, operation: "PUT", maxSize: options.maxSize }) });
+    const connection = await this.connect(nodeId); const channel = connection.channel;
     try {
+      const capability = await this.grant({ nodeId, fileId: fileId(objectId), objectId, operation: "PUT", maxSize: options.maxSize });
+      const receipt = waitForControl(channel, "receipt");
+      void receipt.catch(() => {});
+      await sendControl(channel, { type: "put-init", objectId, capability });
       for await (const input of stream) for (let offset = 0; offset < input.byteLength; offset += CHUNK) { await drain(channel); channel.send(input.slice(offset, offset + CHUNK)); }
       await sendControl(channel, { type: "put-finish" });
       const result = await receipt;
       const token = requiredString(result.capability, "storage receipt");
       await this.submitReceipt?.({ nodeId, fileId: fileId(objectId), receipt: token });
       return { nodeId, objectId, size: requiredNumber(result.size, "receipt size"), checksum: requiredString(result.checksum, "receipt checksum") };
-    } finally { channel.close(); }
+    } finally { connection.close(); }
   }
 
   async getShard(nodeId: string, objectId: string, signal?: AbortSignal) {
@@ -39,17 +42,19 @@ export class WebRtcShardTransport implements ShardTransport {
   }
 
   async getShardStream(nodeId: string, objectId: string, signal?: AbortSignal, start = 0): Promise<ByteStream> {
-    const channel = await this.connect(nodeId);
-    const stream = incoming(channel, signal);
-    await sendControl(channel, { type: "get", objectId, size: start, capability: await this.grant({ nodeId, fileId: fileId(objectId), objectId, operation: "GET" }) });
-    return stream;
+    const connection = await this.connect(nodeId); const channel = connection.channel;
+    try {
+      const stream = incoming(channel, signal, () => connection.close());
+      await sendControl(channel, { type: "get", objectId, size: start, capability: await this.grant({ nodeId, fileId: fileId(objectId), objectId, operation: "GET" }) });
+      return stream;
+    } catch (error) { connection.close(); throw error; }
   }
 
   async deleteShard(nodeId: string, objectId: string) {
-    const channel = await this.connect(nodeId); const complete = waitForControl(channel, "delete-finish");
-    try { await sendControl(channel, { type: "delete", objectId, capability: await this.grant({ nodeId, fileId: fileId(objectId), objectId, operation: "DELETE" }) }); await complete; } finally { channel.close(); }
+    const connection = await this.connect(nodeId); const channel = connection.channel;
+    try { const capability = await this.grant({ nodeId, fileId: fileId(objectId), objectId, operation: "DELETE" }); const complete = waitForControl(channel, "delete-finish"); void complete.catch(() => {}); await sendControl(channel, { type: "delete", objectId, capability }); await complete; } finally { connection.close(); }
   }
-  async healthCheck(nodeId: string) { try { const channel = await this.connect(nodeId); channel.close(); return true; } catch { return false; } }
+  async healthCheck(nodeId: string) { try { const connection = await this.connect(nodeId); connection.close(); return true; } catch { return false; } }
 }
 
 async function sendControl(channel: RTCDataChannel, message: Control) { await drain(channel); channel.send(JSON.stringify(message)); }
@@ -74,7 +79,7 @@ function waitForControl(channel: RTCDataChannel, expected: string) {
     channel.addEventListener("message", message); channel.addEventListener("close", closed, { once: true });
   });
 }
-function incoming(channel: RTCDataChannel, signal?: AbortSignal): ByteStream {
+function incoming(channel: RTCDataChannel, signal?: AbortSignal, closeConnection = () => channel.close()): ByteStream {
   const queue: Uint8Array[] = []; let done = false; let error: unknown; let wake: (() => void) | undefined;
   const notify = () => { const next = wake; wake = undefined; next?.(); };
   const message = (event: MessageEvent) => {
@@ -82,12 +87,12 @@ function incoming(channel: RTCDataChannel, signal?: AbortSignal): ByteStream {
     else { const data = new Uint8Array(event.data as ArrayBuffer); if (data.byteLength === 0 || data.byteLength > CHUNK) error = new Error("Invalid WebRTC binary chunk"); else queue.push(data); }
     notify();
   };
-  const close = () => { if (!done) error = new Error("WebRTC data channel closed"); notify(); };
-  channel.addEventListener("message", message); channel.addEventListener("close", close, { once: true });
+  const onClose = () => { if (!done) error = new Error("WebRTC data channel closed"); notify(); };
+  channel.addEventListener("message", message); channel.addEventListener("close", onClose, { once: true });
   return {
     async *[Symbol.asyncIterator]() {
       try { while (!done || queue.length) { if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError"); if (error) throw error; const chunk = queue.shift(); if (chunk) yield chunk; else await new Promise<void>((resolve) => { wake = resolve; signal?.addEventListener("abort", () => resolve(), { once: true }); }); } }
-      finally { channel.removeEventListener("message", message); channel.removeEventListener("close", close); channel.close(); }
+      finally { channel.removeEventListener("message", message); channel.removeEventListener("close", onClose); closeConnection(); }
     },
   };
 }
