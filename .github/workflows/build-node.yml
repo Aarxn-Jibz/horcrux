@@ -1,0 +1,53 @@
+name: build node binaries
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.artifact }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            artifact: horcrux-node_linux_amd64
+          - runner: ubuntu-24.04-arm
+            artifact: horcrux-node_linux_arm64
+          - runner: windows-latest
+            artifact: horcrux-node_windows_amd64.exe
+          - runner: macos-14
+            artifact: horcrux-node_darwin_arm64
+    defaults:
+      run:
+        working-directory: apps/node
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/node/go.mod
+          cache-dependency-path: apps/node/go.sum
+      - run: go test ./...
+      - run: go test -race ./...
+      - run: go vet ./...
+      - run: go build -o ${{ matrix.artifact }} ./cmd/horcrux-node
+        env:
+          CGO_ENABLED: '1'
+      - name: Generate checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash '${{ matrix.artifact }}' -Algorithm SHA256).Hash.ToLower()
+          "$hash  ${{ matrix.artifact }}" | Set-Content '${{ matrix.artifact }}.sha256' -NoNewline
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            apps/node/${{ matrix.artifact }}
+            apps/node/${{ matrix.artifact }}.sha256
+          if-no-files-found: error

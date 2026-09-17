@@ -203,10 +203,14 @@ bun run test:large-file
 ## Cloudflare Production Deployment
 
 1. Create a production D1 database and add its ID to `apps/api/wrangler.jsonc`.
-2. Apply D1 migrations remotely: `bun --cwd apps/api wrangler d1 migrations apply horcrux-db --remote`.
+2. Apply D1 migrations remotely: `bun --cwd apps/api wrangler d1 migrations apply horcrux-file-system --remote`.
 3. Set secrets: `wrangler secret put JWT_SECRET` and `wrangler secret put CAPABILITY_PRIVATE_KEY`.
 4. Set environment variables `CAPABILITY_PUBLIC_KEY` and `WEB_ORIGIN`.
-5. Deploy Worker (`bun run build:api`) and host the web application bundle (`apps/web/dist`).
+5. Deploy the Worker with `bun --cwd apps/api wrangler deploy`; deploy the built
+   Vite bundle with Wrangler Pages as documented in [CI/CD](docs/ci-cd.md).
+
+Main-push validation, protected deployments, D1 migration approval, and manual
+node-binary artifacts are documented in [CI/CD](docs/ci-cd.md).
 
 ---
 
