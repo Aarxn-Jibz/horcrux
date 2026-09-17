@@ -17,7 +17,7 @@ GET    /health
 
 Every object operation requires `Authorization: Bearer <scoped capability>`. PUT returns a signed storage receipt. Health contains capacity metadata only. The server defaults to six admitted operations and returns `503 node_busy` instead of spawning unbounded goroutines.
 
-Plain HTTP is allowed only on loopback. Remote listeners require `--tls-cert` and `--tls-key`. Browser CORS access is restricted to the exact `--web-origin`.
+Plain HTTP is allowed only on loopback. Remote HTTP listeners require `--tls-cert` and `--tls-key`; WebRTC nodes can use the default loopback listener without an advertised storage endpoint. Browser CORS access is restricted to the exact `--web-origin`.
 
 ## Commands
 
@@ -28,6 +28,6 @@ go build ./cmd/horcrux-node
 go run ./cmd/horcrux-node --help
 ```
 
-Required runtime configuration is the control-plane Ed25519 public verification key. `--control-plane-url` enables outbound signed heartbeats and requires `--advertise-url`, an absolute browser-reachable HTTPS origin (loopback HTTP is only allowed for local development). The endpoint is signed with capacity/health information, then persisted by the control plane for browser placement and download manifests. Heartbeats also pull bounded, object-scoped deletion tasks; each task is verified with the control-plane DELETE capability and acknowledged on the next heartbeat. Keep `--listen` separate from `--advertise-url`, and use `--web-origin` for one exact Vite/production web origin. Enrollment additionally requires `--enrollment-challenge` and the short-lived `HORCRUX_ENROLLMENT_TOKEN`; the daemon clears that environment variable after the one-shot exchange.
+Required runtime configuration is the control-plane Ed25519 public verification key. Select `--transport webrtc` for the direct-connectivity MVP path; this enables signed heartbeats and WebRTC signaling without `--advertise-url` or TLS. HTTP transport still requires `--advertise-url`, an absolute browser-reachable HTTPS origin (loopback HTTP is only allowed for local development). Heartbeats report capacity/health and pull bounded, object-scoped deletion tasks; each task is verified with the control-plane DELETE capability and acknowledged on the next heartbeat. Use `--web-origin` for one exact Vite/production web origin. Enrollment additionally requires `--enrollment-challenge` and the short-lived `HORCRUX_ENROLLMENT_TOKEN`; the daemon clears that environment variable after the one-shot exchange.
 
 The daemon also serves authenticated WebRTC data-channel transfers through the control plane's signaling relay. Direct HTTP remains available for local/LAN use. STUN and TURN configuration are not included.

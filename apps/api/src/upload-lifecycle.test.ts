@@ -33,7 +33,7 @@ const hash = "a".repeat(64);
 
 async function fixture() {
   const db = new TestD1();
-  for (const name of ["0001_initial.sql", "0002_storage_nodes.sql", "0003_node_endpoints.sql", "0004_chunked_format.sql", "0005_webrtc_signaling.sql", "0006_durable_file_deletion.sql"]) db.sqlite.exec(await Bun.file(`${import.meta.dir}/../migrations/${name}`).text());
+  for (const name of ["0001_initial.sql", "0002_storage_nodes.sql", "0003_node_endpoints.sql", "0004_chunked_format.sql", "0005_webrtc_signaling.sql", "0006_durable_file_deletion.sql", "0008_node_transports.sql"]) db.sqlite.exec(await Bun.file(`${import.meta.dir}/../migrations/${name}`).text());
   const control = await keys(); const node = await keys(); const otherNode = await keys();
   db.sqlite.run("INSERT INTO users (id,email,password_hash) VALUES ('user-a','a@example.com','hash'),('user-b','b@example.com','hash')");
   db.sqlite.run("INSERT INTO devices (id,owner_user_id,public_identifier,name,status,storage_capacity,storage_used,available_storage,public_key,protocol_version,health,endpoint) VALUES ('node-a','user-a','node://a','A','online',1000,0,1000,?,'1','healthy','http://localhost:9001'),('node-b','user-b','node://b','B','online',1000,0,1000,?,'1','healthy','http://localhost:9002')", [node.publicKey, otherNode.publicKey]);

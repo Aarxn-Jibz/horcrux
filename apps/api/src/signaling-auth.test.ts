@@ -12,11 +12,11 @@ class TestD1 {
 
 async function fixture() {
   const db = new TestD1();
-  for (const name of ["0001_initial.sql", "0002_storage_nodes.sql", "0003_node_endpoints.sql", "0004_chunked_format.sql", "0005_webrtc_signaling.sql", "0006_durable_file_deletion.sql", "0007_refresh_rotation.sql"]) db.sqlite.exec(await Bun.file(`${import.meta.dir}/../migrations/${name}`).text());
+  for (const name of ["0001_initial.sql", "0002_storage_nodes.sql", "0003_node_endpoints.sql", "0004_chunked_format.sql", "0005_webrtc_signaling.sql", "0006_durable_file_deletion.sql", "0007_refresh_rotation.sql", "0008_node_transports.sql"]) db.sqlite.exec(await Bun.file(`${import.meta.dir}/../migrations/${name}`).text());
   const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
   const privateKey = encodeBase64Url(new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey))); const publicKey = encodeBase64Url(new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey)));
   db.sqlite.run("INSERT INTO users (id,email,password_hash) VALUES ('user-a','a@example.com','hash')");
-  db.sqlite.run("INSERT INTO devices (id,owner_user_id,public_identifier,name,status,storage_capacity,storage_used,available_storage,public_key,protocol_version,health,endpoint) VALUES ('node-a','user-a','node://a','A','online',100,0,100,?,'1','healthy','http://localhost:9001')", [publicKey]);
+  db.sqlite.run("INSERT INTO devices (id,owner_user_id,public_identifier,name,status,storage_capacity,storage_used,available_storage,public_key,protocol_version,health,endpoint,transport) VALUES ('node-a','user-a','node://a','A','online',100,0,100,?,'1','healthy','http://localhost:9001','webrtc')", [publicKey]);
   return { db, privateKey, env: { DB: db as unknown as D1Database, JWT_SECRET: "test-secret-that-is-long-and-random", WEB_ORIGIN: "http://localhost:5173" } as Env };
 }
 

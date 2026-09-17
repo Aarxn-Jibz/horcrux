@@ -13,7 +13,7 @@ router.post("/sessions", async (c) => {
   const body = z.object({ nodeId: z.string().min(1).max(128) }).safeParse(await c.req.json().catch(() => null));
   if (!body.success) throw new ApiError(422, "validation_error", "A storage node is required");
   const user = c.get("user");
-  const node = await c.env.DB.prepare("SELECT id FROM devices WHERE id=? AND owner_user_id=? AND public_key IS NOT NULL AND endpoint IS NOT NULL").bind(body.data.nodeId, user.id).first();
+  const node = await c.env.DB.prepare("SELECT id FROM devices WHERE id=? AND owner_user_id=? AND public_key IS NOT NULL AND transport='webrtc'").bind(body.data.nodeId, user.id).first();
   if (!node) throw new ApiError(404, "node_not_found", "WebRTC node is unavailable");
   const id = crypto.randomUUID(); const expiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
   await c.env.DB.prepare("INSERT INTO webrtc_sessions (id,user_id,device_id,expires_at) VALUES (?,?,?,?)").bind(id, user.id, body.data.nodeId, expiresAt).run();

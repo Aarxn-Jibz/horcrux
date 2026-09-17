@@ -32,7 +32,8 @@ type Payload struct {
 	UsedBytes       int64            `json:"usedBytes"`
 	AvailableBytes  int64            `json:"availableBytes"`
 	NodeVersion     string           `json:"nodeVersion"`
-	Endpoint        string           `json:"endpoint"`
+	Transport       string           `json:"transport"`
+	Endpoint        string           `json:"endpoint,omitempty"`
 	Timestamp       int64            `json:"timestamp"`
 	Features        []string         `json:"features,omitempty"`
 	DeletionResults []DeletionResult `json:"deletionResults,omitempty"`
@@ -64,6 +65,7 @@ type Reporter struct {
 	NodeID          string
 	NodeVersion     string
 	Endpoint        string
+	Transport       string
 	Interval        time.Duration
 	Stats           StatsProvider
 	Signer          receipt.PayloadSigner
@@ -109,7 +111,11 @@ func (reporter *Reporter) Report(ctx context.Context) error {
 		results[index].Error = boundedDeletionError(pending.Error)
 	}
 	reporter.resultsMu.Unlock()
-	payload := Payload{Version: ProtocolVersion, NodeID: reporter.NodeID, Status: "online", CapacityBytes: stats.CapacityBytes, UsedBytes: stats.UsedBytes, AvailableBytes: stats.AvailableBytes, NodeVersion: reporter.NodeVersion, Endpoint: reporter.Endpoint, Timestamp: now.Unix(), Features: []string{"deletion-tasks-v1"}}
+	transport := reporter.Transport
+	if transport == "" {
+		transport = "http"
+	}
+	payload := Payload{Version: ProtocolVersion, NodeID: reporter.NodeID, Status: "online", CapacityBytes: stats.CapacityBytes, UsedBytes: stats.UsedBytes, AvailableBytes: stats.AvailableBytes, NodeVersion: reporter.NodeVersion, Transport: transport, Endpoint: reporter.Endpoint, Timestamp: now.Unix(), Features: []string{"deletion-tasks-v1"}}
 	var body []byte
 	for {
 		payload.DeletionResults = results
@@ -206,7 +212,7 @@ func Verify(token string, publicKey ed25519.PublicKey) (Payload, error) {
 	decoder := json.NewDecoder(bytes.NewReader(payloadBytes))
 	decoder.DisallowUnknownFields()
 	var payload Payload
-	if err := decoder.Decode(&payload); err != nil || payload.Version != ProtocolVersion || payload.NodeID == "" || payload.Status != "online" || payload.CapacityBytes < 0 || payload.UsedBytes < 0 || payload.AvailableBytes < 0 || payload.NodeVersion == "" || payload.Endpoint == "" {
+	if err := decoder.Decode(&payload); err != nil || payload.Version != ProtocolVersion || payload.NodeID == "" || payload.Status != "online" || payload.CapacityBytes < 0 || payload.UsedBytes < 0 || payload.AvailableBytes < 0 || payload.NodeVersion == "" || (payload.Transport != "http" && payload.Transport != "webrtc") || (payload.Transport == "http" && payload.Endpoint == "") {
 		return Payload{}, ErrInvalidHeartbeat
 	}
 	return payload, nil

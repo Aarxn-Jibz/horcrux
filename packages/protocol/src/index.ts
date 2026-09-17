@@ -45,7 +45,8 @@ export const heartbeatSchema = z.object({
   usedBytes: z.int().nonnegative(),
   availableBytes: z.int().nonnegative(),
   nodeVersion: z.string().min(1).max(64),
-  endpoint: z.string().url().max(512),
+  transport: z.enum(["http", "webrtc"]).default("http"),
+  endpoint: z.string().url().max(512).optional(),
   timestamp: z.int().nonnegative(),
   features: z.array(z.literal("deletion-tasks-v1")).max(8).optional(),
   deletionResults: z.array(z.object({

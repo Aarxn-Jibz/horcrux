@@ -12,6 +12,7 @@ import (
 const DefaultMaxConcurrent = 6
 
 type Config struct {
+	Transport             string
 	ListenAddress         string
 	DataDirectory         string
 	CapacityBytes         int64
@@ -36,6 +37,7 @@ func Parse(args []string) (Config, error) {
 	set.Int64Var(&config.CapacityBytes, "capacity-bytes", 100*1024*1024*1024, "maximum object bytes managed by this node")
 	set.IntVar(&config.MaxConcurrent, "max-concurrent", DefaultMaxConcurrent, "maximum concurrent object operations")
 	set.StringVar(&config.ControlPlanePublicKey, "control-plane-public-key", os.Getenv("HORCRUX_CONTROL_PLANE_PUBLIC_KEY"), "base64url Ed25519 capability verification key")
+	set.StringVar(&config.Transport, "transport", "http", "storage transport: http or webrtc")
 	set.StringVar(&config.TLSCertificate, "tls-cert", "", "TLS certificate path")
 	set.StringVar(&config.TLSKey, "tls-key", "", "TLS private key path")
 	set.StringVar(&config.ControlPlaneURL, "control-plane-url", "", "control-plane base URL for outbound heartbeats")
@@ -63,6 +65,9 @@ func Parse(args []string) (Config, error) {
 	if config.ControlPlanePublicKey == "" {
 		return Config{}, errors.New("control-plane public key is required")
 	}
+	if config.Transport != "http" && config.Transport != "webrtc" {
+		return Config{}, errors.New("transport must be http or webrtc")
+	}
 	webOrigin, err := url.Parse(config.WebOrigin)
 	if err != nil || (webOrigin.Scheme != "http" && webOrigin.Scheme != "https") || webOrigin.Host == "" || webOrigin.Path != "" {
 		return Config{}, errors.New("web origin must be an absolute HTTP(S) origin without a path")
@@ -73,7 +78,7 @@ func Parse(args []string) (Config, error) {
 	if config.EnrollmentChallenge != "" && config.ControlPlaneURL == "" {
 		return Config{}, errors.New("control-plane URL is required for enrollment")
 	}
-	if config.ControlPlaneURL != "" && config.AdvertiseURL == "" {
+	if config.ControlPlaneURL != "" && config.Transport == "http" && config.AdvertiseURL == "" {
 		return Config{}, errors.New("advertise URL is required when control-plane heartbeats are enabled")
 	}
 	if config.AdvertiseURL != "" {

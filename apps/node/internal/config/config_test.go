@@ -56,3 +56,10 @@ func TestRequiresSecureAdvertisedEndpointForHeartbeats(t *testing.T) {
 		t.Fatalf("secure advertised endpoint was rejected: %v", err)
 	}
 }
+
+func TestWebRTCDoesNotRequireAdvertisedEndpoint(t *testing.T) {
+	key := []string{"--control-plane-public-key", "test-key", "--control-plane-url", "https://control.example", "--transport", "webrtc"}
+	if _, err := Parse(key); err != nil {
+		t.Fatalf("WebRTC configuration rejected without endpoint: %v", err)
+	}
+}

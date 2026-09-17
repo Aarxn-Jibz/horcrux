@@ -18,13 +18,14 @@ type DeviceRow = {
   health: "healthy" | "degraded" | "unknown";
   public_key: string | null;
   endpoint: string | null;
+  transport: "http" | "webrtc";
 };
 
 const router = new Hono<{ Bindings: Env; Variables: ApiVariables }>();
 router.use("*", requireAuth);
 
 router.get("/", async (c) => {
-  const rows = await c.env.DB.prepare("SELECT id,public_identifier,name,status,storage_capacity,storage_used,available_storage,last_seen,node_version,protocol_version,health,public_key,endpoint FROM devices WHERE owner_user_id=? OR owner_user_id IS NULL ORDER BY name").bind(c.get("user").id).all<DeviceRow>();
+  const rows = await c.env.DB.prepare("SELECT id,public_identifier,name,status,storage_capacity,storage_used,available_storage,last_seen,node_version,protocol_version,health,public_key,endpoint,transport FROM devices WHERE owner_user_id=? OR owner_user_id IS NULL ORDER BY name").bind(c.get("user").id).all<DeviceRow>();
   return c.json({ devices: rows.results.map((row) => {
     const heartbeatTime = row.last_seen ? Date.parse(`${row.last_seen.replace(" ", "T")}Z`) : 0;
     const stale = Boolean(row.public_key) && (heartbeatTime === 0 || heartbeatTime < Date.now() - 2 * 60_000);
@@ -33,6 +34,7 @@ router.get("/", async (c) => {
       publicIdentifier: row.public_identifier,
       name: row.name,
       ...(row.endpoint ? { endpoint: row.endpoint } : {}),
+      transport: row.transport,
       status: stale ? "offline" as const : row.status,
       storageCapacity: row.storage_capacity,
       storageUsed: row.storage_used,

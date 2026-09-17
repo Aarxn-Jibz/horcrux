@@ -127,7 +127,7 @@ describe("storage node control plane", () => {
     }, environment(database));
 
     expect(response.status).toBe(200);
-    expect(database.runs[0]?.bindings).toEqual(["online", 10_000, 4_000, 6_000, "0.1.0", "1", "https://192.168.1.42:9443", "healthy", "node-a"]);
+    expect(database.runs[0]?.bindings).toEqual(["online", 10_000, 4_000, 6_000, "0.1.0", "1", "https://192.168.1.42:9443", "healthy", "http", "node-a"]);
   });
 
   test("issues fresh delete work only to deletion-task nodes", async () => {

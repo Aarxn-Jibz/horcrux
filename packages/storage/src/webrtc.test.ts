@@ -43,3 +43,14 @@ test("WebRTC transport closes the connection handle when setup fails", async () 
   await expect(transport.putShard("node-1", "file-1/object-1", new Uint8Array([1]))).rejects.toThrow("capability unavailable");
   expect(closed).toBe(1);
 });
+
+test("WebRTC transport surfaces direct connection failures without an HTTP fallback", async () => {
+  let connections = 0;
+  const transport = new WebRtcShardTransport(async () => {
+    connections += 1;
+    throw new Error("direct ICE path unavailable");
+  }, async () => "capability");
+
+  await expect(transport.getShard("node-1", "file-1/object-1")).rejects.toThrow("direct ICE path unavailable");
+  expect(connections).toBe(1);
+});

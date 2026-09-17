@@ -18,6 +18,7 @@ type NodeIdentity interface {
 
 type Request struct {
 	ControlPlaneURL string
+	Transport       string
 	ChallengeID     string
 	Token           string
 	Name            string
@@ -42,6 +43,7 @@ func Enroll(ctx context.Context, request Request) (Response, error) {
 		"signature":     base64.RawURLEncoding.EncodeToString(request.Identity.Sign(proof)),
 		"name":          request.Name,
 		"capacityBytes": request.CapacityBytes,
+		"transport":     request.Transport,
 	})
 	if err != nil {
 		return Response{}, fmt.Errorf("encode enrollment request: %w", err)

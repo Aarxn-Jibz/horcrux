@@ -64,6 +64,34 @@ func TestReporterSendsSignedCapacityPayload(t *testing.T) {
 	}
 }
 
+func TestWebRTCHeartbeatDoesNotAdvertiseEndpoint(t *testing.T) {
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var received Payload
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var body struct {
+			Heartbeat string `json:"heartbeat"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		received, err = Verify(body.Heartbeat, privateKey.Public().(ed25519.PublicKey))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &http.Response{StatusCode: http.StatusNoContent, Body: io.NopCloser(bytes.NewReader(nil)), Header: make(http.Header)}, nil
+	})}
+	reporter := Reporter{ControlPlaneURL: "https://control.example", NodeID: "node-a", NodeVersion: "0.1.0", Transport: "webrtc", Stats: testStats{storage.Stats{CapacityBytes: 1000}}, Signer: testSigner{privateKey}, Client: client}
+	if err := reporter.Report(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if received.Transport != "webrtc" || received.Endpoint != "" {
+		t.Fatalf("unexpected WebRTC heartbeat: %#v", received)
+	}
+}
+
 func TestReporterAcknowledgesCompletedDeletionOnNextHeartbeat(t *testing.T) {
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil { t.Fatal(err) }

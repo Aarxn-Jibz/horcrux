@@ -8,7 +8,7 @@ import { chromium, type Browser } from "playwright-core";
 import { encodeBase64Url } from "../packages/protocol/src";
 
 type Process = ReturnType<typeof Bun.spawn>;
-type Node = { endpoint: string; directory: string; process: Process; id?: string };
+type Node = { directory: string; process: Process; id?: string };
 type Session = { accessToken: string };
 
 const CHROMIUM = process.env.HORCRUX_CHROMIUM ?? "/usr/bin/chromium";
@@ -80,17 +80,15 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
     nodes = await Promise.all(ports.map(async (port, index) => {
       const challenge = await request<{ challengeId: string; token: string }>("/devices/enrollment-challenges", { method: "POST" });
       const directory = join(root, `node-${index + 1}`);
-      const child = Bun.spawn([binary, "--data-dir", directory, "--listen", `127.0.0.1:${port}`, "--advertise-url", `http://127.0.0.1:${port}`, "--control-plane-public-key", publicKey, "--control-plane-url", apiUrl, "--enrollment-challenge", challenge.challengeId, "--node-name", `webrtc-node-${index + 1}`, "--web-origin", webUrl], { env: { ...process.env, HORCRUX_ENROLLMENT_TOKEN: challenge.token }, stdout: "inherit", stderr: "inherit" });
-      const endpoint = `http://127.0.0.1:${port}`;
-      await waitFor(() => fetch(`${endpoint}/health`).then((response) => response.ok).catch(() => false), `node ${index + 1}`);
+      const child = Bun.spawn([binary, "--data-dir", directory, "--listen", `127.0.0.1:${port}`, "--transport", "webrtc", "--control-plane-public-key", publicKey, "--control-plane-url", apiUrl, "--enrollment-challenge", challenge.challengeId, "--node-name", `webrtc-node-${index + 1}`, "--web-origin", webUrl], { env: { ...process.env, HORCRUX_ENROLLMENT_TOKEN: challenge.token }, stdout: "inherit", stderr: "inherit" });
       console.log(`webrtc e2e: node ${index + 1} listening`);
-      return { endpoint, directory, process: child };
+      return { directory, process: child };
     }));
     await waitFor(async () => {
-      const devices = await request<{ devices: Array<{ id: string; endpoint?: string; status: string; health: string }> }>("/devices");
+      const devices = await request<{ devices: Array<{ id: string; endpoint?: string; transport: string; status: string; health: string }> }>("/devices");
       const healthy = devices.devices.filter((item) => item.status === "online" && item.health === "healthy");
-      for (const node of nodes) node.id = healthy.find((item) => item.endpoint === node.endpoint)?.id;
-      return nodes.every((node) => node.id);
+      nodes.forEach((node, index) => { node.id = healthy.find((item) => item.transport === "webrtc" && !nodes.slice(0, index).some((prior) => prior.id === item.id))?.id; });
+      return nodes.every((node) => node.id) && healthy.filter((item) => item.transport === "webrtc" && item.endpoint === undefined).length === 2;
     }, "enrolled node heartbeats", 45_000);
     console.log("webrtc e2e: launching Chromium");
     // Pion is not a browser mDNS resolver; expose loopback host candidates for

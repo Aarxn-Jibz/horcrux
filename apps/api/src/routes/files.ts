@@ -19,7 +19,7 @@ router.post("/init", async (c) => {
     SELECT id,public_identifier,name,endpoint,status,storage_capacity,storage_used,available_storage,last_seen,protocol_version
     FROM devices
     WHERE (owner_user_id=? OR owner_user_id IS NULL)
-      AND ${input.storageMode !== "mock" ? "public_key IS NOT NULL AND endpoint IS NOT NULL" : "public_key IS NULL"}
+      AND ${input.storageMode === "http" ? "public_key IS NOT NULL AND transport='http' AND endpoint IS NOT NULL" : input.storageMode === "webrtc" ? "public_key IS NOT NULL AND transport='webrtc'" : "public_key IS NULL"}
       AND status IN ('online','degraded')
       AND available_storage > 0
       AND (
@@ -29,7 +29,7 @@ router.post("/init", async (c) => {
     ORDER BY storage_used * 1.0 / MAX(storage_capacity,1), id
     LIMIT ${requiredNodes}
   `).bind(user.id).all();
-  if (nodes.results.length < requiredNodes) throw new ApiError(409, "insufficient_storage_nodes", input.storageMode !== "mock" ? `Real storage mode requires ${requiredNodes} eligible physical nodes; enroll nodes with a reachable endpoint and wait for their heartbeat` : "No mock storage nodes are currently available");
+  if (nodes.results.length < requiredNodes) throw new ApiError(409, "insufficient_storage_nodes", input.storageMode !== "mock" ? `Real ${input.storageMode} mode requires ${requiredNodes} eligible physical nodes; enroll nodes with a compatible transport and wait for their heartbeat` : "No mock storage nodes are currently available");
   try { await c.env.DB.batch([
     c.env.DB.prepare("INSERT INTO files (id,owner_user_id,original_name,mime_type,original_size,plaintext_hash,status,rs_data_shards,rs_parity_shards,key_share_threshold,key_share_count,format_version) VALUES (?,?,?,?,?,?,'uploading',?,?,?,?,?)").bind(input.fileId, user.id, input.originalName, input.mimeType, input.originalSize, input.plaintextHash, input.dataShards, input.parityShards, input.keyShareThreshold, input.keyShareCount, input.formatVersion ?? 1),
     c.env.DB.prepare("INSERT INTO upload_sessions (id,file_id,user_id,status,expires_at) VALUES (?,?,?,'initialized',?)").bind(sessionId, input.fileId, user.id, expiresAt),

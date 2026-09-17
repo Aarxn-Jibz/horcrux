@@ -1,0 +1,1 @@
+ALTER TABLE devices ADD COLUMN transport TEXT NOT NULL DEFAULT 'http';

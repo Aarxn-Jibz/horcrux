@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { FileManifest, FileSummary } from "@horcrux-file-system/shared";
 import { type ChunkedManifest, type PipelineProgressDetail, type PipelineStage } from "@horcrux-file-system/core";
 import { deleteFile, downloadManifest, getFile } from "../lib/api";
-import { createChunkedFilePipeline, createFilePipeline } from "../lib/pipeline";
+import { createChunkedFilePipeline, createFilePipeline, storageMode } from "../lib/pipeline";
 import { formatBytes } from "./FileList";
 import { ProgressSteps, TimingSummary } from "./ProgressSteps";
 import { OperationError } from "./OperationError";
@@ -30,10 +30,10 @@ export function FileDetails({ fileId, onChanged, onClose }: { fileId: string; on
       setStage("locating");
       const manifest = await downloadManifest(fileId);
       const endpoints = new Map(manifest.objects.flatMap((object) => object.endpoint ? [[object.nodeId, object.endpoint] as const] : []));
-      const mode = endpoints.size > 0 ? "http" : "mock";
+      const mode = storageMode;
       if ((manifest as FileManifest & { formatVersion?: number }).formatVersion === 2) {
         const sink = await openDownloadSink(manifest.originalName, manifest.mimeType, manifest.originalSize);
-        await createChunkedFilePipeline(endpoints).downloadTo(manifest as unknown as ChunkedManifest, sink);
+        await createChunkedFilePipeline(endpoints, mode).downloadTo(manifest as unknown as ChunkedManifest, sink);
       } else {
         const bytes = await createFilePipeline(mode, endpoints).download(manifest, (nextStage, detail) => { setStage(nextStage); setTiming(detail); });
         const sink = await openDownloadSink(manifest.originalName, manifest.mimeType, bytes.byteLength);

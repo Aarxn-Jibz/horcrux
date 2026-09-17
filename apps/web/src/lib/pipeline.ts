@@ -41,7 +41,7 @@ export function createFilePipeline(mode: StorageMode, endpoints: Map<string, str
   return createPipeline(createStorageTransport(mode, endpoints));
 }
 
-export function createChunkedFilePipeline(endpoints: Map<string, string>, mode: StorageMode = "http") {
+export function createChunkedFilePipeline(endpoints: Map<string, string>, mode: StorageMode) {
   return new ChunkedFilePipeline(
     new ZstdCompressionProvider(), new WebCryptoAesGcm(), new WasmReedSolomonProvider(() => reedSolomonFromResponse(fetch(reedSolomonWasmUrl))), new AuditedShamirProvider(), createStorageTransport(mode, endpoints),
   );

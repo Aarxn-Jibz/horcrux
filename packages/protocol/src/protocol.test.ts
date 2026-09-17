@@ -26,6 +26,7 @@ describe("signed protocol envelopes", () => {
       usedBytes: 400,
       availableBytes: 600,
       nodeVersion: "0.1.0",
+      transport: "http",
       endpoint: "https://192.168.1.42:9443",
       timestamp: 2_000_000_000,
     } satisfies NodeHeartbeat;

@@ -68,6 +68,7 @@ func TestEnrollProvesIdentityPossession(t *testing.T) {
 	})}
 
 	response, err := Enroll(context.Background(), Request{
+		Transport:       "webrtc",
 		ControlPlaneURL: "https://control.example/",
 		ChallengeID:     "challenge-id",
 		Token:           "one-time-token",

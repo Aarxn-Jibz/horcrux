@@ -21,6 +21,7 @@ const enrollmentSchema = z.object({
   signature: z.string().min(40).max(128),
   name: z.string().trim().min(1).max(128),
   capacityBytes: z.int().positive(),
+  transport: z.enum(["http", "webrtc"]).default("http"),
 });
 
 type ChallengeRow = { user_id: string; expires_at: string; used_at: string | null };
@@ -42,7 +43,7 @@ router.post("/enroll", async (c) => {
   const claimed = await c.env.DB.prepare("UPDATE device_enrollment_challenges SET used_at=datetime('now') WHERE id=? AND token_hash=? AND used_at IS NULL AND expires_at>datetime('now') RETURNING user_id").bind(input.challengeId, await hashOpaqueToken(input.token)).first<{ user_id: string }>();
   if (!claimed || claimed.user_id !== challenge.user_id) throw new ApiError(401, "enrollment_invalid", "Enrollment challenge was already consumed");
   try {
-    await c.env.DB.prepare("INSERT INTO devices (id,owner_user_id,public_identifier,name,status,storage_capacity,storage_used,available_storage,public_key,protocol_version,health) VALUES (?,?,?,?,'offline',?,0,?,?,'1','unknown')").bind(nodeId, challenge.user_id, `node://${nodeId}`, input.name, input.capacityBytes, input.capacityBytes, input.publicKey).run();
+    await c.env.DB.prepare("INSERT INTO devices (id,owner_user_id,public_identifier,name,status,storage_capacity,storage_used,available_storage,public_key,protocol_version,health,transport) VALUES (?,?,?,?,'offline',?,0,?,?,'1','unknown',?)").bind(nodeId, challenge.user_id, `node://${nodeId}`, input.name, input.capacityBytes, input.capacityBytes, input.publicKey, input.transport).run();
   } catch {
     throw new ApiError(409, "node_already_enrolled", "This node identity is already enrolled");
   }
@@ -70,12 +71,12 @@ router.post("/:id/heartbeat", async (c) => {
     throw new ApiError(422, "heartbeat_capacity_invalid", "Node heartbeat capacity values are inconsistent");
   }
 
-  if (!isSecureNodeEndpoint(heartbeat.endpoint)) {
+  if ((heartbeat.transport === "http" && !heartbeat.endpoint) || (heartbeat.endpoint && !isSecureNodeEndpoint(heartbeat.endpoint))) {
     throw new ApiError(422, "heartbeat_endpoint_invalid", "Node advertised endpoint must be HTTPS, except loopback HTTP for development");
   }
 
   await c.env.DB.prepare(
-    "UPDATE devices SET status=?,storage_capacity=?,storage_used=?,available_storage=?,node_version=?,protocol_version=?,endpoint=?,health=?,last_seen=datetime('now') WHERE id=?",
+    "UPDATE devices SET status=?,storage_capacity=?,storage_used=?,available_storage=?,node_version=?,protocol_version=?,endpoint=?,health=?,transport=?,last_seen=datetime('now') WHERE id=?",
   ).bind(
     heartbeat.status,
     heartbeat.capacityBytes,
@@ -83,8 +84,9 @@ router.post("/:id/heartbeat", async (c) => {
     heartbeat.availableBytes,
     heartbeat.nodeVersion,
     heartbeat.version,
-    heartbeat.endpoint,
+    heartbeat.endpoint ?? null,
     heartbeat.status === "online" ? "healthy" : "degraded",
+    heartbeat.transport,
     node.id,
   ).run();
 
