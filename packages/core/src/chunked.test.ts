@@ -61,6 +61,14 @@ describe("v2 chunked file format", () => {
     expect(join(output)).toEqual(input);
   }, 120_000);
 
+  test("closes every discarded reader while trying shard combinations", async () => {
+    const storage = new TrackingStreamTransport(nodes); const input = generated(CHUNKED_PLAINTEXT_BYTES + 9); const instance = pipeline(storage);
+    const manifest = await instance.upload({ fileId: crypto.randomUUID(), name: "reader-cleanup.bin", mimeType: "application/octet-stream", size: input.byteLength, source: source(input) }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes);
+    await corruptPayload(storage, manifest, 0);
+    await instance.downloadTo(manifest, () => {});
+    expect(storage.closed).toBe(storage.opened);
+  }, 120_000);
+
   test("continues after the first replacement stream also fails", async () => {
     const storage = new OpenFailingTransport(nodes, new Set(["a", "b"])); const input = generated(CHUNKED_PLAINTEXT_BYTES + 9); const instance = pipeline(storage);
     const manifest = await instance.upload({ fileId: crypto.randomUUID(), name: "replacement.bin", mimeType: "application/octet-stream", size: input.byteLength, source: source(input) }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes);
@@ -136,6 +144,15 @@ class OpenFailingTransport extends MemoryShardTransport {
 class MissingObjectOpenTransport extends MemoryShardTransport {
   missingObjectId?: string;
   override async getShardStream(nodeId: string, objectId: string, signal?: AbortSignal, start = 0) { if (objectId === this.missingObjectId) throw new Error("Shard not found"); return super.getShardStream(nodeId, objectId, signal, start); }
+}
+
+class TrackingStreamTransport extends MemoryShardTransport {
+  opened = 0; closed = 0;
+  override async getShardStream(nodeId: string, objectId: string, signal?: AbortSignal, start = 0) {
+    const stream = await super.getShardStream(nodeId, objectId, signal, start); this.opened += 1;
+    const transport = this;
+    return (async function* () { try { yield* stream; } finally { transport.closed += 1; } })();
+  }
 }
 
 class TruncatingTransport extends MemoryShardTransport {

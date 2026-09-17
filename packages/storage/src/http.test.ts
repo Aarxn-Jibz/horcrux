@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { HttpShardTransport, NodeTransportError, type CapabilityRequest } from "./http";
+import { HttpShardTransport, NodeTransportError, readableStreamToAsyncIterable, type CapabilityRequest } from "./http";
 
 describe("HTTP shard transport", () => {
   test("uses scoped grants and submits a signed PUT receipt", async () => {
@@ -50,6 +50,14 @@ describe("HTTP shard transport", () => {
       new NodeTransportError("Node is busy", 503, "node_busy", true),
     );
     expect(operations).toEqual(["GET", "DELETE"]);
+  });
+
+  test("cancels a discarded response stream", async () => {
+    let cancelled = false;
+    const iterator = readableStreamToAsyncIterable(new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new Uint8Array([1])); }, cancel() { cancelled = true; } }))[Symbol.asyncIterator]();
+    await iterator.next();
+    await iterator.return?.(undefined as never);
+    expect(cancelled).toBeTrue();
   });
 
   test("rejects insecure remote endpoints", async () => {

@@ -179,9 +179,12 @@ function asyncIterableToReadableStream(source: ByteStream) {
   });
 }
 
-async function* readableStreamToAsyncIterable(stream: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array> {
+/** @internal */
+export async function* readableStreamToAsyncIterable(stream: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array> {
   const reader = stream.getReader();
-  try { while (true) { const next = await reader.read(); if (next.done) return; yield next.value; } } finally { reader.releaseLock(); }
+  let complete = false;
+  try { while (true) { const next = await reader.read(); if (next.done) { complete = true; return; } yield next.value; } }
+  finally { try { if (!complete) await reader.cancel().catch(() => {}); } finally { reader.releaseLock(); } }
 }
 async function* singleChunk(bytes: Uint8Array): AsyncGenerator<Uint8Array> { yield bytes; }
 
