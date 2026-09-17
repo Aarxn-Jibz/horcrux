@@ -34,7 +34,7 @@ shipping a build pointed at the localhost or mock-storage defaults.
 
 ## GitHub configuration
 
-Create and protect these GitHub Environments with required reviewers:
+Create these GitHub Environments to isolate deployment credentials:
 
 - `production-d1-migrations`
 - `production-api`
@@ -53,14 +53,18 @@ in Cloudflare with `wrangler secret put`; do not place them in GitHub. The
 checked-in Worker configuration already supplies `WEB_ORIGIN` and
 `CAPABILITY_PUBLIC_KEY`.
 
+The workflow does not itself require an Environment approval: `environment:`
+scopes secrets, while required reviewers and wait timers are optional GitHub
+Environment protection rules. Leave those rules unset for these environments
+to keep the normal `main` path fully automatic.
+
 ## D1 migrations
 
 Migration changes run local Wrangler/D1 validation in the five-node suite and
-WebRTC suite, then stop at the protected `production-d1-migrations` environment
-before executing the existing remote Wrangler migration command. Only after
-that approved job succeeds can the Worker deploy. D1 and Worker deployment are
-not one transaction: the reviewer must confirm that a migration is compatible
-with the currently deployed Worker and that the forward migration is intended.
+WebRTC suite, then automatically execute the existing remote Wrangler migration
+command. A migration failure fails its job, so the API deployment condition is
+not met. D1 and Worker deployment are not one transaction; migrations must
+remain forward-compatible with the currently deployed Worker.
 
 ## Local parity
 

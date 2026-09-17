@@ -209,7 +209,7 @@ bun run test:large-file
 5. Deploy the Worker with `bun --cwd apps/api wrangler deploy`; deploy the built
    Vite bundle with Wrangler Pages as documented in [CI/CD](docs/ci-cd.md).
 
-Main-push validation, protected deployments, D1 migration approval, and manual
+Main-push validation, automated deployments and D1 migrations, and manual
 node-binary artifacts are documented in [CI/CD](docs/ci-cd.md).
 
 ---
