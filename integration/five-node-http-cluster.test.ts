@@ -99,7 +99,10 @@ describe("five real Go nodes through the HTTP control plane", () => {
     const endpoints = new Map(initialized.nodes.map((node) => [node.id, node.endpoint]));
     const pipeline = makePipeline(endpoints);
     manifest = await pipeline.upload({ fileId, name: "cluster.bin", mimeType: "application/octet-stream", bytes: original, plaintextHash: originalHash }, DEFAULT_PIPELINE, initialized.nodes.map((node) => node.id));
-    await request(`/files/${fileId}/complete`, { method: "POST", body: JSON.stringify(commitBody(manifest)) });
+    const completed = commitBody(manifest);
+    await request(`/files/${fileId}/complete`, { method: "POST", body: JSON.stringify(completed) });
+    await request(`/files/${fileId}/complete`, { method: "POST", body: JSON.stringify(completed) });
+    await expect(request(`/files/${fileId}/complete`, { method: "POST", body: JSON.stringify({ ...completed, ciphertextHash: "0".repeat(64) }) })).rejects.toThrow(/failed \(409\)/);
 
     const authorized = await request<FileManifest>(`/files/${fileId}/download-manifest`);
     expect(authorized.objects).toHaveLength(10);

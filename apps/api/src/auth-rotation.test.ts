@@ -34,7 +34,10 @@ describe("refresh rotation", () => {
     expect(responses.filter((response) => response.status === 200)).toHaveLength(1);
     expect(responses.filter((response) => response.status === 401)).toHaveLength(1);
     expect(row(db, "SELECT COUNT(*) count FROM refresh_tokens WHERE user_id='user-a' AND revoked_at IS NULL")).toEqual({ count: 1 });
-    expect(row(db, "SELECT replaced_by_token_id,rotation_id FROM refresh_tokens WHERE id='predecessor'")).toMatchObject({ rotation_id: null });
+    const predecessor = row(db, "SELECT replaced_by_token_id,rotation_id FROM refresh_tokens WHERE id='predecessor'") as { replaced_by_token_id: string | null; rotation_id: string | null };
+    expect(predecessor.rotation_id).toBeNull();
+    expect(predecessor.replaced_by_token_id).toBeString();
+    expect(row(db, "SELECT COUNT(*) count FROM refresh_tokens WHERE id=? AND revoked_at IS NULL", [predecessor.replaced_by_token_id])).toEqual({ count: 1 });
   });
 
   test("rotates sequentially, rejects predecessor reuse, and logout revokes a racing successor", async () => {

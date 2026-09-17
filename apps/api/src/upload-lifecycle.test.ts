@@ -69,6 +69,9 @@ describe("upload lifecycle recovery", () => {
     // so the browser does not enter its rollback path.
     expect((await request(env, `/files/${fileId}/complete`, token, body)).status).toBe(200);
     expect(first(db, "SELECT status FROM files WHERE id=?", [fileId])).toEqual({ status: "available" });
+    expect((await request(env, `/files/${fileId}/complete`, token, {})).status).toBe(422);
+    expect((await request(env, `/files/${fileId}/complete`, token, { ...body, ciphertextHash: "b".repeat(64) })).status).toBe(409);
+    expect((await request(env, `/files/${fileId}/complete`, token, { ...body, objects: body.objects.slice(1) })).status).toBe(409);
 
     const stranded = seedUpload(db, "user-a", "committing");
     expect((await request(env, `/files/${stranded}/complete`, token, manifest(stranded))).status).toBe(200);

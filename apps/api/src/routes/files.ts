@@ -39,11 +39,14 @@ router.post("/init", async (c) => {
 
 router.post("/:id/complete", async (c) => {
   const file = await getOwnedFile(c.env.DB, c.req.param("id"), c.get("user").id);
-  if (file.status === "available" && !file.deletion_state) return c.json({ fileId: file.id, status: "available" });
+  const parsed = fileCommitSchema.safeParse(await c.req.json().catch(() => null)); if (!parsed.success) throw new ApiError(422, "validation_error", parsed.error.issues[0]?.message ?? "Invalid object metadata");
+  if (file.status === "available" && !file.deletion_state) {
+    if (!await matchesCommittedManifest(c.env.DB, file, parsed.data)) throw new ApiError(409, "completion_payload_mismatch", "Completion retry does not match the committed file");
+    return c.json({ fileId: file.id, status: "available" });
+  }
   if (file.status !== "uploading") throw new ApiError(409, "invalid_upload_state", "File upload is not awaiting completion");
   const session = await c.env.DB.prepare("SELECT expires_at,status FROM upload_sessions WHERE file_id=? AND user_id=? ORDER BY created_at DESC LIMIT 1").bind(file.id, c.get("user").id).first<{ expires_at: string; status: string }>();
   if (!session || session.status === "aborted" || Date.parse(session.expires_at) <= Date.now()) throw new ApiError(409, "upload_expired", "The upload session has expired or was aborted");
-  const parsed = fileCommitSchema.safeParse(await c.req.json().catch(() => null)); if (!parsed.success) throw new ApiError(422, "validation_error", parsed.error.issues[0]?.message ?? "Invalid object metadata");
   const input = parsed.data; const shards = input.objects.filter((item) => item.kind === "shard" && item.status === "stored"); const shares = input.objects.filter((item) => item.kind === "key-share" && item.status === "stored");
   if (shards.some((item) => !item.shardType || item.index >= file.rs_data_shards + file.rs_parity_shards) || shares.some((item) => item.index >= file.key_share_count)) throw new ApiError(422, "invalid_object_index", "Shard or key-share metadata is outside the configured range");
   if (shards.length < file.rs_data_shards) throw new ApiError(409, "insufficient_shards", `At least ${file.rs_data_shards} stored shards are required`);
@@ -73,6 +76,17 @@ router.post("/:id/complete", async (c) => {
   }
   return c.json({ fileId: file.id, status: "available" });
 });
+
+async function matchesCommittedManifest(db: D1Database, file: import("../data/files").FileRow, input: z.infer<typeof fileCommitSchema>) {
+  const metadataMatches = file.format_version === 2
+    ? input.formatVersion === 2 && input.chunkSize === file.chunk_size && input.chunkCount === file.chunk_count && input.noncePrefix === file.nonce_prefix
+    : input.formatVersion !== 2 && input.compressedSize === file.compressed_size && input.encryptedSize === file.encrypted_size && input.ciphertextHash === file.ciphertext_hash && input.encryptionIv === file.encryption_iv && input.shardSize === file.rs_shard_size;
+  if (!metadataMatches) return false;
+  const committed = await getObjects(db, file.id);
+  const normalize = (object: typeof committed[number]) => ({ id: object.id, kind: object.kind, index: object.index, nodeId: object.nodeId, objectId: object.objectId, size: object.size, checksum: object.checksum, shardType: object.shardType, status: object.status });
+  const order = (left: ReturnType<typeof normalize>, right: ReturnType<typeof normalize>) => `${left.kind}:${left.index}`.localeCompare(`${right.kind}:${right.index}`);
+  return JSON.stringify(committed.map(normalize).sort(order)) === JSON.stringify(input.objects.map(normalize).sort(order));
+}
 
 async function abortUpload(db: D1Database, file: { id: string }, userId: string) {
   const objects = await db.prepare("SELECT MIN(jti) source_id,CASE WHEN object_id LIKE '%/key-share/%' THEN 'key-share' ELSE 'shard' END object_kind,device_id,object_id FROM issued_capabilities WHERE user_id=? AND file_id=? AND operation='PUT' GROUP BY device_id,object_id").bind(userId, file.id).all<DeletionCandidate>();
