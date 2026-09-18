@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -94,6 +95,10 @@ func DecodeJoinToken(value string) (JoinToken, error) {
 	var token JoinToken
 	if err := json.Unmarshal(encoded, &token); err != nil || token.ChallengeID == "" || token.Token == "" || token.ControlPlaneURL == "" || token.ControlPlanePublicKey == "" {
 		return JoinToken{}, errors.New("enrollment token is malformed; create a new token in Horcrux")
+	}
+	publicKey, err := base64.RawURLEncoding.DecodeString(token.ControlPlanePublicKey)
+	if err != nil || len(publicKey) != ed25519.PublicKeySize {
+		return JoinToken{}, errors.New("enrollment token has an invalid control-plane key; create a new token in Horcrux")
 	}
 	return token, nil
 }

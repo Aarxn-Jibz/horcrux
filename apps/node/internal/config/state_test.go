@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"os"
@@ -8,8 +9,12 @@ import (
 	"testing"
 )
 
+func testControlPlaneKey() string {
+	return base64.RawURLEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize))
+}
+
 func TestJoinTokenAndSavedConfiguration(t *testing.T) {
-	encoded, err := json.Marshal(JoinToken{ChallengeID: "challenge", Token: "one-time-token", ControlPlaneURL: "https://control.example", ControlPlanePublicKey: "test-key"})
+	encoded, err := json.Marshal(JoinToken{ChallengeID: "challenge", Token: "one-time-token", ControlPlaneURL: "https://control.example", ControlPlanePublicKey: testControlPlaneKey()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,6 +34,16 @@ func TestJoinTokenAndSavedConfiguration(t *testing.T) {
 	}
 	if loaded.ControlPlaneURL != config.ControlPlaneURL || loaded.DataDirectory != config.DataDirectory {
 		t.Fatalf("saved configuration changed: %#v", loaded)
+	}
+}
+
+func TestRejectsJoinTokenWithInvalidControlPlaneKey(t *testing.T) {
+	encoded, err := json.Marshal(JoinToken{ChallengeID: "challenge", Token: "one-time-token", ControlPlaneURL: "https://control.example", ControlPlanePublicKey: "not-a-public-key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodeJoinToken(base64.RawURLEncoding.EncodeToString(encoded)); err == nil {
+		t.Fatal("join token with an invalid control-plane key was accepted")
 	}
 }
 
