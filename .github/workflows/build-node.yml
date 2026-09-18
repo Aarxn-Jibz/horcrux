@@ -16,13 +16,13 @@ jobs:
       matrix:
         include:
           - runner: ubuntu-latest
-            artifact: horcrux-node_linux_amd64
+            artifact: horcrux-node-linux-amd64
           - runner: ubuntu-24.04-arm
-            artifact: horcrux-node_linux_arm64
+            artifact: horcrux-node-linux-arm64
           - runner: windows-latest
-            artifact: horcrux-node_windows_amd64.exe
+            artifact: horcrux-node-windows-amd64.exe
           - runner: macos-14
-            artifact: horcrux-node_darwin_arm64
+            artifact: horcrux-node-darwin-arm64
     defaults:
       run:
         working-directory: apps/node

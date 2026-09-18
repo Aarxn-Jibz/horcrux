@@ -154,7 +154,13 @@ bun run test:node
 ```
 
 ### Node Enrollment & Execution
-Create an enrollment challenge via the Web API, then run the daemon:
+Create an enrollment token via Horcrux, then run the downloaded daemon:
+
+```bash
+horcrux-node join '<enrollment-token>'
+```
+
+For development and legacy HTTP-node testing, the flag-based daemon remains available:
 
 ```bash
 export HORCRUX_ENROLLMENT_TOKEN='<one-time token>'

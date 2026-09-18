@@ -49,11 +49,14 @@ router.get("/", async (c) => {
 });
 
 router.post("/enrollment-challenges", async (c) => {
-  const token = createOpaqueToken();
-  const challengeId = crypto.randomUUID();
-  const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
-  await c.env.DB.prepare("INSERT INTO device_enrollment_challenges (id,user_id,token_hash,expires_at) VALUES (?,?,?,?)").bind(challengeId, c.get("user").id, await hashOpaqueToken(token), expiresAt).run();
-  return c.json({ challengeId, token, expiresAt }, 201);
+	const token = createOpaqueToken();
+	const challengeId = crypto.randomUUID();
+	const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
+	await c.env.DB.prepare("INSERT INTO device_enrollment_challenges (id,user_id,token_hash,expires_at) VALUES (?,?,?,?)").bind(challengeId, c.get("user").id, await hashOpaqueToken(token), expiresAt).run();
+	const controlPlanePublicKey = c.env.CAPABILITY_PUBLIC_KEY;
+	if (!controlPlanePublicKey) throw new Error("CAPABILITY_PUBLIC_KEY is required for node enrollment");
+	const joinToken = btoa(JSON.stringify({ challengeId, token, server: new URL(c.req.url).origin, controlPlanePublicKey })).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+	return c.json({ challengeId, token, expiresAt, joinToken }, 201);
 });
 
 export default router;
