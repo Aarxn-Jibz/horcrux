@@ -25,7 +25,7 @@ import (
 
 func main() {
 	args := os.Args[1:]
-	if len(args) == 0 || args[0] == "start" || args[0] == "status" || args[0] == "join" {
+	if len(args) == 0 || args[0] == "start" || args[0] == "status" || args[0] == "join" || args[0] == "--config-dir" {
 		runCommand(args)
 		return
 	}
@@ -52,12 +52,9 @@ func main() {
 }
 
 func runCommand(args []string) {
-	command := "start"
-	if len(args) > 0 {
-		command = args[0]
-	}
+	command, commandArgs := splitCommand(args)
 	if command == "join" {
-		configuration, token, configDirectory, err := config.ParseJoin(args[1:])
+		configuration, token, configDirectory, err := config.ParseJoin(commandArgs)
 		if err != nil {
 			fatal("invalid join command", err)
 		}
@@ -88,7 +85,7 @@ func runCommand(args []string) {
 		run(configuration, nodeIdentity)
 		return
 	}
-	configDirectory, err := commandConfigDirectory(args[1:])
+	configDirectory, err := commandConfigDirectory(commandArgs)
 	if err != nil {
 		fatal("invalid command", err)
 	}
@@ -109,6 +106,13 @@ func runCommand(args []string) {
 	}
 	fmt.Printf("Horcrux Node\nNode ID: %s\nConnecting to Horcrux...\n", nodeIdentity.NodeID)
 	run(configuration, nodeIdentity)
+}
+
+func splitCommand(args []string) (string, []string) {
+	if len(args) == 0 || args[0] == "--config-dir" {
+		return "start", args
+	}
+	return args[0], args[1:]
 }
 
 func commandConfigDirectory(args []string) (string, error) {
