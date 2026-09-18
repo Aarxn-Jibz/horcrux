@@ -180,6 +180,7 @@ jobs:
       - run: bun --cwd apps/api wrangler d1 migrations apply horcrux-file-system --remote
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
 
   deploy-api:
     needs: [changes, bun, go, five-node-http, webrtc, migrate-api]
@@ -191,7 +192,7 @@ jobs:
       (needs.migrate-api.result == 'success' || needs.migrate-api.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: production-api
+    environment: production-d1-migrations
     concurrency:
       group: production-api
       cancel-in-progress: false
@@ -204,6 +205,7 @@ jobs:
       - run: bun --cwd apps/api wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
 
   deploy-web:
     needs: [changes, bun, go, five-node-http, webrtc]
@@ -214,7 +216,7 @@ jobs:
       (needs.webrtc.result == 'success' || needs.webrtc.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: production-web
+    environment: production-d1-migrations
     concurrency:
       group: production-web
       cancel-in-progress: false
@@ -234,3 +236,4 @@ jobs:
       - run: bun --cwd apps/api wrangler pages deploy ../web/dist --project-name horcruxfs --commit-hash "$GITHUB_SHA"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
