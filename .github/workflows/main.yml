@@ -107,6 +107,22 @@ jobs:
       - run: go vet ./...
       - run: go build -o horcrux-node-ci ./cmd/horcrux-node
 
+  windows-node-storage:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/node
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/node/go.mod
+          cache-dependency-path: apps/node/go.sum
+      - run: go test ./internal/storage ./internal/identity ./internal/server
+      - run: go build -o horcrux-node.exe ./cmd/horcrux-node
+
   five-node-http:
     needs: [changes, bun, go]
     if: needs.changes.outputs.http == 'true'
