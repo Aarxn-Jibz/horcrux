@@ -183,7 +183,7 @@ func (s *Store) PutBounded(ctx context.Context, objectID string, source io.Reade
 	return s.put(ctx, objectID, source, "", 0, maximumSize, false)
 }
 
-func (s *Store) put(ctx context.Context, objectID string, source io.Reader, expectedChecksum string, expectedSize, reservedSize int64, exact bool) (Metadata, error) {
+func (s *Store) put(ctx context.Context, objectID string, source io.Reader, expectedChecksum string, expectedSize, reservedSize int64, exact bool) (metadata Metadata, err error) {
 	if exact && !checksumPattern.MatchString(expectedChecksum) {
 		return Metadata{}, ErrChecksumMismatch
 	}
@@ -207,10 +207,17 @@ func (s *Store) put(ctx context.Context, objectID string, source io.Reader, expe
 	}
 	temporaryPath := temporary.Name()
 	committed := false
+	temporaryClosed := false
 	defer func() {
-		temporary.Close()
+		if !temporaryClosed {
+			if closeErr := temporary.Close(); closeErr != nil {
+				err = errors.Join(err, fmt.Errorf("close temporary object: %w", closeErr))
+			}
+		}
 		if !committed {
-			_ = os.Remove(temporaryPath)
+			if removeErr := os.Remove(temporaryPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				err = errors.Join(err, fmt.Errorf("remove temporary object: %w", removeErr))
+			}
 		}
 	}()
 
@@ -232,19 +239,24 @@ func (s *Store) put(ctx context.Context, objectID string, source io.Reader, expe
 	if err := temporary.Close(); err != nil {
 		return Metadata{}, fmt.Errorf("close object: %w", err)
 	}
+	temporaryClosed = true
 	if err := os.Rename(temporaryPath, path); err != nil {
 		return Metadata{}, fmt.Errorf("commit object bytes: %w", err)
 	}
 	if err := syncDirectory(filepath.Dir(path)); err != nil {
-		_ = os.Remove(path)
+		if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return Metadata{}, errors.Join(err, fmt.Errorf("remove unpublished object: %w", removeErr))
+		}
 		return Metadata{}, err
 	}
 
 	createdAt := time.Now().UTC()
-	metadata := Metadata{ObjectID: objectID, Checksum: actualChecksum, Size: written, CreatedAt: createdAt, Status: "stored", Path: path}
+	metadata = Metadata{ObjectID: objectID, Checksum: actualChecksum, Size: written, CreatedAt: createdAt, Status: "stored", Path: path}
 	if _, err := s.database.ExecContext(ctx, `INSERT INTO objects (object_id,checksum,size,created_at,status,path) VALUES (?,?,?,?,?,?)
 		ON CONFLICT(object_id) DO UPDATE SET checksum=excluded.checksum,size=excluded.size,created_at=excluded.created_at,status=excluded.status,path=excluded.path`, objectID, actualChecksum, written, createdAt.Unix(), metadata.Status, path); err != nil {
-		_ = os.Remove(path)
+		if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return Metadata{}, errors.Join(fmt.Errorf("commit object metadata: %w", err), fmt.Errorf("remove unpublished object: %w", removeErr))
+		}
 		return Metadata{}, fmt.Errorf("commit object metadata: %w", err)
 	}
 	committed = true

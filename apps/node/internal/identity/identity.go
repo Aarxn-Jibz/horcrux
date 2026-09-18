@@ -87,7 +87,7 @@ func load(path string) (*Identity, error) {
 	return &Identity{NodeID: stored.NodeID, PublicKey: ed25519.PublicKey(publicKey), privateKey: ed25519.PrivateKey(privateKey)}, nil
 }
 
-func persist(path string, identity *Identity) error {
+func persist(path string, identity *Identity) (err error) {
 	stored := persistedIdentity{
 		NodeID:     identity.NodeID,
 		PublicKey:  identity.PublicKeyBase64(),
@@ -103,10 +103,17 @@ func persist(path string, identity *Identity) error {
 	}
 	temporaryPath := temporary.Name()
 	committed := false
+	temporaryClosed := false
 	defer func() {
-		temporary.Close()
+		if !temporaryClosed {
+			if closeErr := temporary.Close(); closeErr != nil {
+				err = errors.Join(err, fmt.Errorf("close temporary identity: %w", closeErr))
+			}
+		}
 		if !committed {
-			_ = os.Remove(temporaryPath)
+			if removeErr := os.Remove(temporaryPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				err = errors.Join(err, fmt.Errorf("remove temporary identity: %w", removeErr))
+			}
 		}
 	}()
 	if err := temporary.Chmod(0o600); err != nil {
@@ -121,6 +128,7 @@ func persist(path string, identity *Identity) error {
 	if err := temporary.Close(); err != nil {
 		return fmt.Errorf("close node identity: %w", err)
 	}
+	temporaryClosed = true
 	if err := os.Rename(temporaryPath, path); err != nil {
 		return fmt.Errorf("commit node identity: %w", err)
 	}
