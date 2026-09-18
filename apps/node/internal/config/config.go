@@ -50,60 +50,70 @@ func Parse(args []string) (Config, error) {
 	if err := set.Parse(args); err != nil {
 		return Config{}, err
 	}
+	return config, validate(config)
+}
+
+func validate(config Config) error {
 	if config.DataDirectory == "" {
-		return Config{}, errors.New("data directory is required")
+		return errors.New("data directory is required")
 	}
 	if config.CapacityBytes < 1 {
-		return Config{}, errors.New("capacity must be positive")
+		return errors.New("capacity must be positive")
 	}
 	if config.MaxConcurrent < 1 || config.MaxConcurrent > 64 {
-		return Config{}, errors.New("max concurrency must be between 1 and 64")
+		return errors.New("max concurrency must be between 1 and 64")
 	}
 	if config.HeartbeatInterval < 10*time.Second {
-		return Config{}, errors.New("heartbeat interval must be at least 10 seconds")
+		return errors.New("heartbeat interval must be at least 10 seconds")
 	}
 	if config.ControlPlanePublicKey == "" {
-		return Config{}, errors.New("control-plane public key is required")
+		return errors.New("control-plane public key is required")
 	}
 	if config.Transport != "http" && config.Transport != "webrtc" {
-		return Config{}, errors.New("transport must be http or webrtc")
+		return errors.New("transport must be http or webrtc")
 	}
 	webOrigin, err := url.Parse(config.WebOrigin)
 	if err != nil || (webOrigin.Scheme != "http" && webOrigin.Scheme != "https") || webOrigin.Host == "" || webOrigin.Path != "" {
-		return Config{}, errors.New("web origin must be an absolute HTTP(S) origin without a path")
+		return errors.New("web origin must be an absolute HTTP(S) origin without a path")
 	}
 	if (config.EnrollmentChallenge == "") != (config.EnrollmentToken == "") {
-		return Config{}, errors.New("enrollment challenge and token must be configured together")
+		return errors.New("enrollment challenge and token must be configured together")
 	}
 	if config.EnrollmentChallenge != "" && config.ControlPlaneURL == "" {
-		return Config{}, errors.New("control-plane URL is required for enrollment")
+		return errors.New("control-plane URL is required for enrollment")
 	}
 	if config.ControlPlaneURL != "" && config.Transport == "http" && config.AdvertiseURL == "" {
-		return Config{}, errors.New("advertise URL is required when control-plane heartbeats are enabled")
+		return errors.New("advertise URL is required when control-plane heartbeats are enabled")
 	}
 	if config.AdvertiseURL != "" {
 		advertised, err := url.Parse(config.AdvertiseURL)
 		if err != nil || advertised.Host == "" || advertised.Path != "" || advertised.RawQuery != "" || advertised.Fragment != "" {
-			return Config{}, errors.New("advertise URL must be an absolute origin without a path")
+			return errors.New("advertise URL must be an absolute origin without a path")
 		}
 		ip := net.ParseIP(advertised.Hostname())
 		loopback := advertised.Hostname() == "localhost" || (ip != nil && ip.IsLoopback())
 		if advertised.Scheme != "https" && !(advertised.Scheme == "http" && loopback) {
-			return Config{}, errors.New("advertise URL must use HTTPS unless it is loopback")
+			return errors.New("advertise URL must use HTTPS unless it is loopback")
 		}
 	}
 	if (config.TLSCertificate == "") != (config.TLSKey == "") {
-		return Config{}, errors.New("TLS certificate and key must be configured together")
+		return errors.New("TLS certificate and key must be configured together")
 	}
 	if config.TLSCertificate == "" {
 		host, _, err := net.SplitHostPort(config.ListenAddress)
 		if err != nil {
-			return Config{}, errors.New("listen address must include host and port")
+			return errors.New("listen address must include host and port")
 		}
 		ip := net.ParseIP(host)
 		if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
-			return Config{}, errors.New("plain HTTP is restricted to a loopback address; configure TLS for remote access")
+			return errors.New("plain HTTP is restricted to a loopback address; configure TLS for remote access")
 		}
 	}
-	return config, nil
+	if config.ControlPlaneURL != "" {
+		controlPlane, err := url.Parse(config.ControlPlaneURL)
+		if err != nil || (controlPlane.Scheme != "http" && controlPlane.Scheme != "https") || controlPlane.Host == "" {
+			return errors.New("control-plane URL must be an absolute HTTP(S) URL")
+		}
+	}
+	return nil
 }

@@ -53,6 +53,17 @@ func LoadOrCreate(dataDirectory string) (*Identity, error) {
 	return identity, nil
 }
 
+func Load(dataDirectory string) (*Identity, error) {
+	if dataDirectory == "" {
+		return nil, errors.New("identity data directory is required")
+	}
+	identity, err := load(filepath.Join(dataDirectory, identityFilename))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, errors.New("node identity is missing; do not re-enroll over existing storage")
+	}
+	return identity, err
+}
+
 func (i *Identity) PublicKeyBase64() string {
 	return base64.RawURLEncoding.EncodeToString(i.PublicKey)
 }

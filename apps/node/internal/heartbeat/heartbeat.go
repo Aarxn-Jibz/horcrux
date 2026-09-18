@@ -71,6 +71,7 @@ type Reporter struct {
 	Signer          receipt.PayloadSigner
 	Client          *http.Client
 	OnError         func(error)
+	OnSuccess       func()
 	Now             func() time.Time
 	Delete          func(context.Context, DeletionTask) error
 	pendingResults  []DeletionResult
@@ -158,6 +159,9 @@ func (reporter *Reporter) Report(ctx context.Context) error {
 		reporter.resultsMu.Unlock()
 	}
 	if response.StatusCode == http.StatusNoContent {
+		if reporter.OnSuccess != nil {
+			reporter.OnSuccess()
+		}
 		return nil
 	}
 	var reply deletionResponse
@@ -175,6 +179,9 @@ func (reporter *Reporter) Report(ctx context.Context) error {
 		reporter.resultsMu.Lock()
 		reporter.pendingResults = append(reporter.pendingResults, result)
 		reporter.resultsMu.Unlock()
+	}
+	if reporter.OnSuccess != nil {
+		reporter.OnSuccess()
 	}
 	return nil
 }
