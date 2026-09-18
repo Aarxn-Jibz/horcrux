@@ -124,6 +124,9 @@ func persist(path string, identity *Identity) error {
 	if err := os.Rename(temporaryPath, path); err != nil {
 		return fmt.Errorf("commit node identity: %w", err)
 	}
+	if err := syncDirectory(filepath.Dir(path)); err != nil {
+		return err
+	}
 	committed = true
 	return nil
 }
