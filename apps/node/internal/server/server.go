@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -147,7 +146,7 @@ func (s *Server) getObject(writer http.ResponseWriter, request *http.Request) {
 	writer.Header().Set("X-Object-Checksum", metadata.Checksum)
 	// ServeContent handles validated HTTP byte ranges so a downloader can replace
 	// a dead HRS2 shard at an exact record boundary without replaying prior bytes.
-	if file, ok := object.(*os.File); ok {
+	if file, ok := object.(io.ReadSeeker); ok {
 		http.ServeContent(writer, request, objectID, metadata.CreatedAt, file)
 		return
 	}

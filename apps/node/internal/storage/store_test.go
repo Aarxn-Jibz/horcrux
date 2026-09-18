@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func checksum(data []byte) string {
@@ -19,12 +20,109 @@ func checksum(data []byte) string {
 
 func openTestStore(t *testing.T, capacity int64) *Store {
 	t.Helper()
-	store, err := Open(t.TempDir(), capacity)
+	return openStore(t, t.TempDir(), capacity)
+}
+
+func openStore(t *testing.T, root string, capacity int64) *Store {
+	t.Helper()
+	store, err := Open(root, capacity)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	return store
+}
+
+func TestPutAndDeleteSurviveRestart(t *testing.T) {
+	root := t.TempDir()
+	data := []byte("survives a node restart")
+	store := openStore(t, root, 1024)
+	metadata, err := store.Put(context.Background(), "restart/object", bytes.NewReader(data), checksum(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store = openStore(t, root, 1024)
+	reader, _, err := store.OpenObject(context.Background(), metadata.ObjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := io.ReadAll(reader)
+	if closeErr := reader.Close(); err != nil || closeErr != nil || !bytes.Equal(restored, data) {
+		t.Fatalf("restart read mismatch: %q, %v, %v", restored, err, closeErr)
+	}
+	if err := store.Delete(context.Background(), metadata.ObjectID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store = openStore(t, root, 1024)
+	if _, err := store.Metadata(context.Background(), metadata.ObjectID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted object reappeared after restart: %v", err)
+	}
+}
+
+func TestRestartCleansUncommittedFilesAndAllowsRetry(t *testing.T) {
+	root := t.TempDir()
+	store := openStore(t, root, 1024)
+	objectID := "retry/object"
+	path := store.objectPath(objectID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("orphaned before metadata"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pending := filepath.Join(filepath.Dir(path), ".pending-interrupted")
+	if err := os.WriteFile(pending, []byte("partial"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store = openStore(t, root, 1024)
+	for _, candidate := range []string{path, pending} {
+		if _, err := os.Stat(candidate); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("uncommitted file survived restart: %s: %v", candidate, err)
+		}
+	}
+	data := []byte("retry succeeds")
+	if _, err := store.Put(context.Background(), objectID, bytes.NewReader(data), checksum(data), int64(len(data))); err != nil {
+		t.Fatalf("retry after cleanup: %v", err)
+	}
+}
+
+func TestDeleteWaitsForOpenObject(t *testing.T) {
+	store := openTestStore(t, 1024)
+	data := []byte("close before delete")
+	if _, err := store.Put(context.Background(), "open/object", bytes.NewReader(data), checksum(data), int64(len(data))); err != nil {
+		t.Fatal(err)
+	}
+	reader, _, err := store.OpenObject(context.Background(), "open/object")
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	deleted := make(chan error, 1)
+	go func() {
+		close(started)
+		deleted <- store.Delete(context.Background(), "open/object")
+	}()
+	<-started
+	select {
+	case err := <-deleted:
+		t.Fatalf("delete completed while object was open: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-deleted; err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestPutReadDeleteAndCapacity(t *testing.T) {
