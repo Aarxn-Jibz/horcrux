@@ -125,6 +125,37 @@ func TestDeleteWaitsForOpenObject(t *testing.T) {
 	}
 }
 
+func TestPutCanReplaceDeletedOrMissingObjectAfterRestart(t *testing.T) {
+	root := t.TempDir()
+	store := openStore(t, root, 1024)
+	objectID := "replace/object"
+	first := []byte("first")
+	metadata, err := store.Put(context.Background(), objectID, bytes.NewReader(first), checksum(first), int64(len(first)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Delete(context.Background(), objectID); err != nil {
+		t.Fatal(err)
+	}
+	second := []byte("second")
+	if _, err := store.Put(context.Background(), objectID, bytes.NewReader(second), checksum(second), int64(len(second))); err != nil {
+		t.Fatalf("replace deleted object: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(metadata.Path); err != nil {
+		t.Fatal(err)
+	}
+	store = openStore(t, root, 1024)
+	if _, err := store.Metadata(context.Background(), objectID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing object remained stored after restart: %v", err)
+	}
+	if _, err := store.Put(context.Background(), objectID, bytes.NewReader(second), checksum(second), int64(len(second))); err != nil {
+		t.Fatalf("replace recovered missing object: %v", err)
+	}
+}
+
 func TestPutReadDeleteAndCapacity(t *testing.T) {
 	store := openTestStore(t, 1024)
 	data := []byte("opaque encrypted object")
