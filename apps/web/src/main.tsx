@@ -13,6 +13,7 @@ import { listFiles, logout, refresh, type User } from "./lib/api";
 
 type View = "landing" | "auth" | "files" | "devices";
 
+// Keep the browser entry point static-hosting friendly for Pages deployment.
 function App() {
   const [user, setUser] = useState<User | null>();
   const [files, setFiles] = useState<FileSummary[]>([]);

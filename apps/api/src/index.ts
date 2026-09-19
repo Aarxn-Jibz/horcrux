@@ -10,6 +10,7 @@ import nodeRoutes from "./routes/nodes";
 import webRtcRoutes from "./routes/webrtc";
 
 const app = new Hono<{ Bindings: Env; Variables: ApiVariables }>();
+// Production API deployment serves both browser and enrolled-node routes.
 app.use("*", async (c, next) => {
   const origin = c.req.header("Origin");
   const changesState = !["GET", "HEAD", "OPTIONS"].includes(c.req.method);
