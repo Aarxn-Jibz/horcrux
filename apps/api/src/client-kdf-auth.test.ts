@@ -28,5 +28,5 @@ test("unknown login challenges use indistinguishable fake KDF data", async () =>
   const first = await request("/challenge", { email: "missing@example.com" }, env); const second = await request("/challenge", { email: "missing@example.com" }, env);
   expect(first.status).toBe(200); expect(second.status).toBe(200);
   const one = await first.json() as { kdf: ReturnType<typeof freshKdf> }; const two = await second.json() as { kdf: ReturnType<typeof freshKdf> };
-  expect(one.kdf.version).toBe(two.kdf.version); expect(one.kdf.iterations).toBe(two.kdf.iterations); expect(one.kdf.salt).not.toBe(two.kdf.salt);
+  expect(one.kdf.version).toBe(two.kdf.version); expect(one.kdf.iterations).toBe(two.kdf.iterations); expect(one.kdf.salt).toHaveLength(24); expect(one.kdf.salt).not.toBe(two.kdf.salt);
 });
