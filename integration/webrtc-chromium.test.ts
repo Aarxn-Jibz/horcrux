@@ -11,6 +11,8 @@ import { nodeBinary } from "./node-binary";
 type Process = ReturnType<typeof Bun.spawn>;
 type Node = { directory: string; process: Process; id?: string };
 type Session = { accessToken: string };
+const TEST_KDF = { version: "pbkdf2-sha256-v1", iterations: 310_000, salt: "AAAAAAAAAAAAAAAAAAAAAA==" };
+const TEST_CREDENTIAL = "derived-test-credential-012345678901234567890123456789";
 
 const CHROMIUM = process.env.HORCRUX_CHROMIUM ?? "/usr/bin/chromium";
 const GO_CACHE = join(process.cwd(), ".integration-cache", "go-build");
@@ -55,7 +57,7 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
     const privateKey = encodeBase64Url(new Uint8Array(await crypto.subtle.exportKey("pkcs8", keyPair.privateKey)));
     const publicKey = encodeBase64Url(new Uint8Array(await crypto.subtle.exportKey("raw", keyPair.publicKey)));
     const environmentFile = join(root, "api.env");
-    await Bun.write(environmentFile, `JWT_SECRET=webrtc-test-${crypto.randomUUID()}\nWEB_ORIGIN=${webUrl}\nCAPABILITY_PRIVATE_KEY=${privateKey}\nCAPABILITY_PUBLIC_KEY=${publicKey}\nTURN_KEY_ID=test-key\nTURN_API_TOKEN=test-only-token\nTURN_CREDENTIALS_URL=${webUrl}/turn-credentials\n`);
+    await Bun.write(environmentFile, `JWT_SECRET=webrtc-test-${crypto.randomUUID()}\nAUTH_PEPPER=webrtc-test-pepper\nWEB_ORIGIN=${webUrl}\nCAPABILITY_PRIVATE_KEY=${privateKey}\nCAPABILITY_PUBLIC_KEY=${publicKey}\nTURN_KEY_ID=test-key\nTURN_API_TOKEN=test-only-token\nTURN_CREDENTIALS_URL=${webUrl}/turn-credentials\n`);
     const persistence = join(root, "d1");
     console.log("webrtc e2e: migrating local D1");
     await run(["./node_modules/.bin/wrangler", "d1", "migrations", "apply", "horcrux-file-system", "--local", "--persist-to", persistence], "apps/api");
@@ -73,7 +75,7 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
         ? new Response(Bun.file(bundle), { headers: { "Content-Type": "text/javascript" } })
         : new Response("<!doctype html><title>Horcrux WebRTC integration</title>", { headers: { "Content-Type": "text/html" } });
     } });
-    session = await request<Session>("/auth/register", { method: "POST", body: JSON.stringify({ email: `webrtc-${crypto.randomUUID()}@example.com`, password: "browser-webrtc-correct-horse" }) }, false);
+    session = await request<Session>("/auth/register", { method: "POST", body: JSON.stringify({ email: `webrtc-${crypto.randomUUID()}@example.com`, credential: TEST_CREDENTIAL, kdf: TEST_KDF }) }, false);
     const binary = await nodeBinary();
     console.log("webrtc e2e: starting node processes");
     const ports = await Promise.all([reservePort(), reservePort()]);

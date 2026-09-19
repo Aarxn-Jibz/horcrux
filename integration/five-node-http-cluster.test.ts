@@ -12,6 +12,8 @@ import { nodeBinary } from "./node-binary";
 
 type Node = { endpoint: string; directory: string; process: ReturnType<typeof Bun.spawn>; id?: string; publicKey?: string };
 type Session = { accessToken: string };
+const TEST_KDF = { version: "pbkdf2-sha256-v1", iterations: 310_000, salt: "AAAAAAAAAAAAAAAAAAAAAA==" };
+const TEST_CREDENTIAL = "derived-test-credential-012345678901234567890123456789";
 
 describe("five real Go nodes through the HTTP control plane", () => {
   let root = "";
@@ -34,7 +36,7 @@ describe("five real Go nodes through the HTTP control plane", () => {
     const privateKey = encodeBase64Url(new Uint8Array(await crypto.subtle.exportKey("pkcs8", keyPair.privateKey)));
     const publicKey = encodeBase64Url(new Uint8Array(await crypto.subtle.exportKey("raw", keyPair.publicKey)));
     const environmentFile = join(root, "api.env");
-    await Bun.write(environmentFile, `JWT_SECRET=cluster-test-secret-${crypto.randomUUID()}\nWEB_ORIGIN=http://localhost:5173\nCAPABILITY_PRIVATE_KEY=${privateKey}\nCAPABILITY_PUBLIC_KEY=${publicKey}\n`);
+    await Bun.write(environmentFile, `JWT_SECRET=cluster-test-secret-${crypto.randomUUID()}\nAUTH_PEPPER=cluster-test-pepper\nWEB_ORIGIN=http://localhost:5173\nCAPABILITY_PRIVATE_KEY=${privateKey}\nCAPABILITY_PUBLIC_KEY=${publicKey}\n`);
     const persistence = join(root, "d1");
     await run(["./node_modules/.bin/wrangler", "d1", "migrations", "apply", "horcrux-file-system", "--local", "--persist-to", persistence], "apps/api");
     apiProcess = Bun.spawn([
@@ -42,7 +44,7 @@ describe("five real Go nodes through the HTTP control plane", () => {
       "--persist-to", persistence, "--env-file", environmentFile, "--log-level", "error",
     ], { cwd: "apps/api", stdout: "pipe", stderr: "pipe" });
     await waitFor(() => fetch(`${apiUrl}/health`).then((response) => response.ok).catch(() => false), "control plane");
-    session = await request<Session>("/auth/register", { method: "POST", body: JSON.stringify({ email: `cluster-${crypto.randomUUID()}@example.com`, password: "cluster-test-correct-horse" }) }, false);
+    session = await request<Session>("/auth/register", { method: "POST", body: JSON.stringify({ email: `cluster-${crypto.randomUUID()}@example.com`, credential: TEST_CREDENTIAL, kdf: TEST_KDF }) }, false);
 
     const binary = await nodeBinary();
     const ports = await Promise.all(Array.from({ length: 5 }, reservePort));
