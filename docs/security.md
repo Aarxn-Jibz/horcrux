@@ -8,6 +8,10 @@ The Worker may learn user identity, filenames, MIME types, sizes, hashes, algori
 
 ## Identity and enrollment
 
+## Password authentication
+
+The browser derives a password-equivalent credential with PBKDF2-SHA-256 (310,000 iterations, unique 16-byte salt) using Web Crypto, then sends that credential only in the HTTPS request body. It is never persisted by the browser. D1 stores the versioned KDF parameters and only `HMAC-SHA-256(AUTH_PEPPER, credential)`; `AUTH_PEPPER` is a dedicated Worker secret and is never stored in D1 or returned to clients. The derived credential is password-equivalent for this service: it must be treated like a password in transit and logs. A D1-only compromise does not provide a value accepted by login; a pepper-only compromise does not provide account verifiers.
+
 Each node generates a long-lived Ed25519 keypair. The private key stays in `identity.json` under the configured node data directory with mode `0600`; it is never uploaded to Hono. The node ID is deterministically derived from the first 16 bytes of SHA-256 over its raw public key.
 
 The current local mechanism is explicit and portable, not an OS keystore. Protect the node data directory with normal full-disk encryption and account permissions. OS credential-store integration is future hardening.

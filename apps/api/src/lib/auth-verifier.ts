@@ -1,9 +1,11 @@
 const encoder = new TextEncoder();
 export const KDF_VERSION = "pbkdf2-sha256-v1";
 export const KDF_ITERATIONS = 310_000;
-export type Kdf = { version: string; iterations: number; salt: string };
+export type Kdf = { version: string; algorithm: "PBKDF2"; hash: "SHA-256"; iterations: number; salt: string; derivedKeyLength: 256 };
 const encode = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
-export function freshKdf(): Kdf { return { version: KDF_VERSION, iterations: KDF_ITERATIONS, salt: encode(crypto.getRandomValues(new Uint8Array(16))) }; }
-export function validKdf(value: unknown): value is Kdf { return !!value && typeof value === "object" && (value as Kdf).version === KDF_VERSION && (value as Kdf).iterations === KDF_ITERATIONS && typeof (value as Kdf).salt === "string" && /^[A-Za-z0-9+/]{22}==$/.test((value as Kdf).salt); }
+export function freshKdf(): Kdf { return { version: KDF_VERSION, algorithm: "PBKDF2", hash: "SHA-256", iterations: KDF_ITERATIONS, salt: encode(crypto.getRandomValues(new Uint8Array(16))), derivedKeyLength: 256 }; }
+export function validKdf(value: unknown): value is Kdf { return !!value && typeof value === "object" && (value as Kdf).version === KDF_VERSION && (value as Kdf).algorithm === "PBKDF2" && (value as Kdf).hash === "SHA-256" && (value as Kdf).iterations === KDF_ITERATIONS && (value as Kdf).derivedKeyLength === 256 && typeof (value as Kdf).salt === "string" && /^[A-Za-z0-9+/]{22}==$/.test((value as Kdf).salt); }
 export async function verifier(credential: string, pepper?: string) { if (!pepper) throw new Error("AUTH_PEPPER is not configured"); const key = await crypto.subtle.importKey("raw", encoder.encode(pepper), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]); return encode(new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(credential)))); }
+export async function fakeKdf(email: string, pepper?: string): Promise<Kdf> { if (!pepper) throw new Error("AUTH_PEPPER is not configured"); const key = await crypto.subtle.importKey("raw", encoder.encode(pepper), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]); const bytes = new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(`horcrux-auth-fake-salt-v1:${email}`))); return { ...freshKdf(), salt: encode(bytes.slice(0, 16)) }; }
+export function legacyKdf(value: string): { kdf: Kdf; credential: string } | null { const parts = value.split("$"); if (parts.length !== 4 || parts[0] !== "pbkdf2-sha256" || parts[1] !== String(KDF_ITERATIONS) || !/^[A-Za-z0-9+/]{22}==$/.test(parts[2]!) || !/^[A-Za-z0-9+/]{43}=$/.test(parts[3]!)) return null; return { kdf: { ...freshKdf(), salt: parts[2]! }, credential: parts[3]! }; }
 export function equal(left: string, right: string) { if (left.length !== right.length) return false; let difference = 0; for (let i = 0; i < left.length; i++) difference |= left.charCodeAt(i) ^ right.charCodeAt(i); return difference === 0; }

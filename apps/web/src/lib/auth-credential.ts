@@ -1,6 +1,7 @@
-export type Kdf = { version: "pbkdf2-sha256-v1"; iterations: 310000; salt: string };
+export type Kdf = { version: "pbkdf2-sha256-v1"; algorithm: "PBKDF2"; hash: "SHA-256"; iterations: 310000; salt: string; derivedKeyLength: 256 };
 const encoder = new TextEncoder();
 const bytes = (value: string) => Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
 const encode = (value: Uint8Array) => btoa(String.fromCharCode(...value));
-export function freshKdf(): Kdf { return { version: "pbkdf2-sha256-v1", iterations: 310000, salt: encode(crypto.getRandomValues(new Uint8Array(16))) }; }
-export async function deriveCredential(password: string, kdf: Kdf) { const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]); return encode(new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: bytes(kdf.salt), iterations: kdf.iterations }, key, 256))); }
+export function freshKdf(): Kdf { return { version: "pbkdf2-sha256-v1", algorithm: "PBKDF2", hash: "SHA-256", iterations: 310000, salt: encode(crypto.getRandomValues(new Uint8Array(16))), derivedKeyLength: 256 }; }
+export function validKdf(value: unknown): value is Kdf { if (!value || typeof value !== "object") return false; const kdf = value as Kdf; if (kdf.version !== "pbkdf2-sha256-v1" || kdf.algorithm !== "PBKDF2" || kdf.hash !== "SHA-256" || kdf.iterations !== 310000 || kdf.derivedKeyLength !== 256 || typeof kdf.salt !== "string" || !/^[A-Za-z0-9+/]{22}==$/.test(kdf.salt)) return false; try { return bytes(kdf.salt).byteLength === 16; } catch { return false; } }
+export async function deriveCredential(password: string, kdf: unknown) { if (!validKdf(kdf)) throw new Error("Unsupported authentication KDF parameters"); const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]); return encode(new Uint8Array(await crypto.subtle.deriveBits({ name: kdf.algorithm, hash: kdf.hash, salt: bytes(kdf.salt), iterations: kdf.iterations }, key, kdf.derivedKeyLength))); }

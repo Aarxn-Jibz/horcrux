@@ -11,7 +11,7 @@ import { nodeBinary } from "./node-binary";
 type Process = ReturnType<typeof Bun.spawn>;
 type Node = { directory: string; process: Process; id?: string };
 type Session = { accessToken: string };
-const TEST_KDF = { version: "pbkdf2-sha256-v1", iterations: 310_000, salt: "AAAAAAAAAAAAAAAAAAAAAA==" };
+const TEST_KDF = { version: "pbkdf2-sha256-v1", algorithm: "PBKDF2", hash: "SHA-256", iterations: 310_000, salt: "AAAAAAAAAAAAAAAAAAAAAA==", derivedKeyLength: 256 };
 const TEST_CREDENTIAL = "derived-test-credential-012345678901234567890123456789";
 
 const CHROMIUM = process.env.HORCRUX_CHROMIUM ?? "/usr/bin/chromium";
@@ -68,9 +68,11 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
     const bundle = join(root, "webrtc-transport.js");
     const built = await Bun.build({ entrypoints: [join(process.cwd(), "packages/storage/src/webrtc.ts")], outdir: root, naming: "webrtc-transport.js", target: "browser", format: "esm" });
     if (!built.success) throw new Error(`Could not build browser transport: ${built.logs.map((log) => log.message).join("; ")}`);
-    web = Bun.serve({ hostname: "127.0.0.1", port: webPort, fetch(request) {
+    web = Bun.serve({ hostname: "127.0.0.1", port: webPort, async fetch(request) {
       return new URL(request.url).pathname === "/turn-credentials"
-        ? Response.json({ iceServers: [{ urls: ["stun:stun.example.test:3478"] }] })
+        ? request.method !== "POST" || request.headers.get("Content-Type") !== "application/json" || JSON.stringify(await request.json()) !== JSON.stringify({ ttl: 600 })
+          ? new Response("invalid TURN contract", { status: 400 })
+          : Response.json({ iceServers: [{ urls: ["stun:stun.example.test:3478"] }, { urls: ["turn:turn.example.test:3478?transport=udp"], username: "temporary", credential: "temporary" }] })
         : new URL(request.url).pathname === "/webrtc-transport.js"
         ? new Response(Bun.file(bundle), { headers: { "Content-Type": "text/javascript" } })
         : new Response("<!doctype html><title>Horcrux WebRTC integration</title>", { headers: { "Content-Type": "text/html" } });

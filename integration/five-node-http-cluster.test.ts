@@ -12,7 +12,7 @@ import { nodeBinary } from "./node-binary";
 
 type Node = { endpoint: string; directory: string; process: ReturnType<typeof Bun.spawn>; id?: string; publicKey?: string };
 type Session = { accessToken: string };
-const TEST_KDF = { version: "pbkdf2-sha256-v1", iterations: 310_000, salt: "AAAAAAAAAAAAAAAAAAAAAA==" };
+const TEST_KDF = { version: "pbkdf2-sha256-v1", algorithm: "PBKDF2", hash: "SHA-256", iterations: 310_000, salt: "AAAAAAAAAAAAAAAAAAAAAA==", derivedKeyLength: 256 };
 const TEST_CREDENTIAL = "derived-test-credential-012345678901234567890123456789";
 
 describe("five real Go nodes through the HTTP control plane", () => {
