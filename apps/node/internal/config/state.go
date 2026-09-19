@@ -151,3 +151,22 @@ func Save(configDirectory string, configuration Config) error {
 	}
 	return nil
 }
+
+func PreflightDirectory(directory string) error {
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return fmt.Errorf("create node configuration directory: %w", err)
+	}
+	temporary, err := os.CreateTemp(directory, ".horcrux-preflight-*")
+	if err != nil {
+		return fmt.Errorf("write node configuration directory: %w", err)
+	}
+	path := temporary.Name()
+	if err := temporary.Close(); err != nil {
+		_ = os.Remove(path)
+		return fmt.Errorf("close node configuration directory check: %w", err)
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("clean node configuration directory check: %w", err)
+	}
+	return nil
+}

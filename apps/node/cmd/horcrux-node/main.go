@@ -63,6 +63,9 @@ func runCommand(args []string) {
 		} else if !errors.Is(err, config.ErrNotEnrolled) {
 			fatal("load saved node configuration", err)
 		}
+		if err := preflightJoin(configuration, configDirectory); err != nil {
+			fatal("prepare node directories", err)
+		}
 		fmt.Println("Horcrux Node\n\nCreating device identity...")
 		nodeIdentity, err := identity.LoadOrCreate(configDirectory)
 		if err != nil {
@@ -106,6 +109,13 @@ func runCommand(args []string) {
 	}
 	fmt.Printf("Horcrux Node\nNode ID: %s\nConnecting to Horcrux...\n", nodeIdentity.NodeID)
 	run(configuration, nodeIdentity)
+}
+
+func preflightJoin(configuration config.Config, configDirectory string) error {
+	if err := config.PreflightDirectory(configDirectory); err != nil {
+		return err
+	}
+	return storage.Preflight(configuration.DataDirectory)
 }
 
 func splitCommand(args []string) (string, []string) {

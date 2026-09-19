@@ -64,6 +64,30 @@ type objectLock struct {
 	refs int
 }
 
+// Preflight verifies that a storage root can be created and written without
+// opening SQLite or running recovery, so joining cannot mutate stored objects.
+func Preflight(root string) error {
+	if root == "" {
+		return errors.New("storage root is required")
+	}
+	if err := os.MkdirAll(filepath.Join(root, "objects"), 0o700); err != nil {
+		return fmt.Errorf("create object directory: %w", err)
+	}
+	temporary, err := os.CreateTemp(root, ".horcrux-preflight-*")
+	if err != nil {
+		return fmt.Errorf("write storage directory: %w", err)
+	}
+	path := temporary.Name()
+	if err := temporary.Close(); err != nil {
+		_ = os.Remove(path)
+		return fmt.Errorf("close storage directory check: %w", err)
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("clean storage directory check: %w", err)
+	}
+	return nil
+}
+
 func Open(root string, capacityBytes int64) (*Store, error) {
 	if root == "" || capacityBytes < 1 {
 		return nil, errors.New("storage root and positive capacity are required")
