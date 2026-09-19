@@ -27,7 +27,7 @@ func NewManager(servers []webrtc.ICEServer) *Manager {
 	return &Manager{peers: map[string]*webrtc.PeerConnection{}, config: webrtc.Configuration{ICEServers: servers}, api: webrtc.NewAPI(webrtc.WithSettingEngine(engine))}
 }
 
-func (m *Manager) AcceptOffer(ctx context.Context, sessionID, encoded string, onChannel func(*webrtc.DataChannel)) (string, error) {
+func (m *Manager) AcceptOffer(ctx context.Context, sessionID, encoded string, servers []webrtc.ICEServer, onChannel func(*webrtc.DataChannel)) (string, error) {
 	debug := os.Getenv("HORCRUX_WEBRTC_DEBUG") == "1"
 	m.mu.Lock()
 	if _, exists := m.peers[sessionID]; exists {
@@ -35,7 +35,9 @@ func (m *Manager) AcceptOffer(ctx context.Context, sessionID, encoded string, on
 		return "", fmt.Errorf("session already has a peer")
 	}
 	m.mu.Unlock()
-	connection, err := m.api.NewPeerConnection(m.config)
+	configuration := m.config
+	configuration.ICEServers = servers
+	connection, err := m.api.NewPeerConnection(configuration)
 	if err != nil {
 		return "", err
 	}

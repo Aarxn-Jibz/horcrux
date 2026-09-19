@@ -48,7 +48,12 @@ func (s *Service) poll(ctx context.Context) {
 			if signal.Type != "offer" {
 				continue
 			}
-			answer, err := s.Manager.AcceptOffer(ctx, id, signal.Payload, func(channel *webrtc.DataChannel) {
+			servers, iceErr := s.Signals.ICE(ctx, id)
+			if iceErr != nil {
+				slog.Debug("webrtc ICE configuration rejected", "error", iceErr)
+				continue
+			}
+			answer, err := s.Manager.AcceptOffer(ctx, id, signal.Payload, servers, func(channel *webrtc.DataChannel) {
 				session := NewObjectSession(ctx, s.NodeID, s.Store, s.Verifier, s.Signer)
 				channel.OnMessage(func(message webrtc.DataChannelMessage) {
 					if message.IsString {

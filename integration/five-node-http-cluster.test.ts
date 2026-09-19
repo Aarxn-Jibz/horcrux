@@ -8,6 +8,7 @@ import { AuditedShamirProvider, BrowserFilePipeline, ChunkedFilePipeline, type C
 import { HttpShardTransport, type CapabilityRequest } from "../packages/storage/src";
 import { DEFAULT_PIPELINE, type FileManifest } from "../packages/shared/src";
 import { encodeBase64Url } from "../packages/protocol/src";
+import { nodeBinary } from "./node-binary";
 
 type Node = { endpoint: string; directory: string; process: ReturnType<typeof Bun.spawn>; id?: string; publicKey?: string };
 type Session = { accessToken: string };
@@ -43,8 +44,7 @@ describe("five real Go nodes through the HTTP control plane", () => {
     await waitFor(() => fetch(`${apiUrl}/health`).then((response) => response.ok).catch(() => false), "control plane");
     session = await request<Session>("/auth/register", { method: "POST", body: JSON.stringify({ email: `cluster-${crypto.randomUUID()}@example.com`, password: "cluster-test-correct-horse" }) }, false);
 
-    const binary = join(root, "horcrux-node");
-    await run(["go", "build", "-o", binary, "./cmd/horcrux-node"], "apps/node");
+    const binary = await nodeBinary();
     const ports = await Promise.all(Array.from({ length: 5 }, reservePort));
     nodes = await Promise.all(ports.map(async (port, index) => {
       const challenge = await request<{ challengeId: string; token: string }>("/devices/enrollment-challenges", { method: "POST" });

@@ -145,7 +145,11 @@ jobs:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
       - run: bun install --frozen-lockfile
+      - run: go build -o "$RUNNER_TEMP/horcrux-node" ./cmd/horcrux-node
+        working-directory: apps/node
       - run: bun run test:five-node
+        env:
+          HORCRUX_NODE_BINARY: ${{ runner.temp }}/horcrux-node
 
   webrtc:
     needs: [changes, bun, go]
@@ -171,9 +175,12 @@ jobs:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
       - run: bun install --frozen-lockfile
+      - run: go build -o "$RUNNER_TEMP/horcrux-node" ./cmd/horcrux-node
+        working-directory: apps/node
       - run: bun run test:webrtc
         env:
           HORCRUX_CHROMIUM: ${{ steps.chrome.outputs.chrome-path }}
+          HORCRUX_NODE_BINARY: ${{ runner.temp }}/horcrux-node
 
   migrate-api:
     needs: [changes, bun, go, five-node-http, webrtc]

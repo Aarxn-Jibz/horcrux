@@ -5,6 +5,7 @@ import type { Env } from "../env";
 import type { ApiVariables } from "../middleware/auth";
 import { requireAuth } from "../middleware/auth";
 import { ApiError } from "../lib/http";
+import { issueIceServers } from "../lib/ice";
 
 const router = new Hono<{ Bindings: Env; Variables: ApiVariables }>();
 router.use("*", requireAuth);
@@ -15,9 +16,10 @@ router.post("/sessions", async (c) => {
   const user = c.get("user");
   const node = await c.env.DB.prepare("SELECT id FROM devices WHERE id=? AND owner_user_id=? AND public_key IS NOT NULL AND transport='webrtc'").bind(body.data.nodeId, user.id).first();
   if (!node) throw new ApiError(404, "node_not_found", "WebRTC node is unavailable");
+  const iceServers = await issueIceServers(c.env);
   const id = crypto.randomUUID(); const expiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
   await c.env.DB.prepare("INSERT INTO webrtc_sessions (id,user_id,device_id,expires_at) VALUES (?,?,?,?)").bind(id, user.id, body.data.nodeId, expiresAt).run();
-  return c.json({ sessionId: id, expiresAt }, 201);
+  return c.json({ sessionId: id, expiresAt, iceServers }, 201);
 });
 
 router.post("/sessions/:id/signals", async (c) => {

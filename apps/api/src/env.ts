@@ -4,4 +4,6 @@ export interface Env {
   WEB_ORIGIN: string;
   CAPABILITY_PRIVATE_KEY?: string;
   CAPABILITY_PUBLIC_KEY?: string;
+  TURN_KEY_ID?: string;
+  TURN_API_TOKEN?: string;
 }

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/horcrux-file-system/horcrux/apps/node/internal/receipt"
+	"github.com/pion/webrtc/v4"
 )
 
 type NodeAuth struct {
@@ -24,6 +25,45 @@ type NodeAuth struct {
 	SignalHash string `json:"signalHash,omitempty"`
 	Timestamp  int64  `json:"timestamp"`
 }
+
+func (client *SignalingClient) ICE(ctx context.Context, sessionID string) ([]webrtc.ICEServer, error) {
+	auth, err := client.auth("signals", sessionID, nil)
+	if err != nil {
+		return nil, err
+	}
+	body, err := json.Marshal(map[string]string{"auth": auth, "sessionId": sessionID})
+	if err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(client.ControlPlaneURL, "/")+"/nodes/"+client.NodeID+"/webrtc/ice", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	httpClient := client.Client
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 10 * time.Second}
+	}
+	response, err := httpClient.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode/100 != 2 {
+		return nil, fmt.Errorf("ICE configuration rejected: %d", response.StatusCode)
+	}
+	var decoded struct {
+		ICEServers []webrtc.ICEServer `json:"iceServers"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&decoded); err != nil {
+		return nil, err
+	}
+	if len(decoded.ICEServers) == 0 {
+		return nil, fmt.Errorf("ICE configuration is empty")
+	}
+	return decoded.ICEServers, nil
+}
+
 type Signal struct {
 	Type    string `json:"type"`
 	Payload string `json:"payload"`

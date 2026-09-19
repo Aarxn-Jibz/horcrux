@@ -7,6 +7,7 @@ import { HttpShardTransport, type CapabilityRequest } from "../packages/storage/
 import { sha256 } from "../packages/core/src";
 import { encodeBase64Url, storageReceiptSchema, verifyEnvelope, type StorageCapability } from "../packages/protocol/src";
 import { issueCapability, receiptMatchesCapability } from "../apps/api/src/lib/node-crypto";
+import { nodeBinary } from "./node-binary";
 
 type IdentityFile = { nodeId: string; publicKey: string };
 
@@ -24,9 +25,7 @@ describe("local browser-control-node data path", () => {
     const controlKeys = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
     capabilityPrivateKey = encodeBase64Url(new Uint8Array(await crypto.subtle.exportKey("pkcs8", controlKeys.privateKey)));
     const capabilityPublicKey = encodeBase64Url(new Uint8Array(await crypto.subtle.exportKey("raw", controlKeys.publicKey)));
-    const binary = join(dataDirectory, "horcrux-node");
-    const build = Bun.spawn(["go", "build", "-o", binary, "./apps/node/cmd/horcrux-node"], { cwd: join(import.meta.dir, ".."), env: { ...process.env, GOCACHE: "/tmp/horcrux-go-cache", GOMODCACHE: "/tmp/horcrux-go-mod" }, stdout: "pipe", stderr: "pipe" });
-    if ((await build.exited) !== 0) throw new Error(`Go node build failed: ${await new Response(build.stderr).text()}`);
+    const binary = await nodeBinary();
     nodeProcess = Bun.spawn([
       binary,
       "--data-dir", dataDirectory,

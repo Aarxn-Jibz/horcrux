@@ -12,6 +12,7 @@ import type { Env } from "../env";
 import type { ApiVariables } from "../middleware/auth";
 import { requireAuth } from "../middleware/auth";
 import { ApiError } from "../lib/http";
+import { issueIceServers } from "../lib/ice";
 import { deriveNodeId, enrollmentProofPayload, hashOpaqueToken, issueCapability, receiptMatchesCapability, verifyNodeSignature } from "../lib/node-crypto";
 
 const enrollmentSchema = z.object({
@@ -193,6 +194,17 @@ router.post("/:id/webrtc/signals", async (c) => {
   if (body.data.signal) await c.env.DB.prepare("INSERT INTO webrtc_signals (id,session_id,sender,signal_type,payload) VALUES (?,?,?,?,?)").bind(crypto.randomUUID(), body.data.sessionId, "node", body.data.signal.type, body.data.signal.payload).run();
   const signals = await c.env.DB.prepare("SELECT signal_type type,payload FROM webrtc_signals WHERE session_id=? AND sender='browser' ORDER BY created_at,id").bind(body.data.sessionId).all<{ type: "offer" | "ice-candidate"; payload: string }>();
   return c.json({ signals: signals.results });
+});
+
+router.post("/:id/webrtc/ice", async (c) => {
+  const body = z.object({ auth: z.string().min(80), sessionId: z.uuid() }).safeParse(await c.req.json().catch(() => null));
+  if (!body.success) throw new ApiError(422, "validation_error", "Node ICE authorization is required");
+  const node = await c.env.DB.prepare("SELECT id,public_key FROM devices WHERE id=? AND public_key IS NOT NULL").bind(c.req.param("id")).first<NodeRow>();
+  if (!node) throw new ApiError(404, "node_not_found", "Storage node not found");
+  await verifySignalAuth(body.data.auth, node, { operation: "signals", sessionId: body.data.sessionId });
+  const session = await c.env.DB.prepare("SELECT id FROM webrtc_sessions WHERE id=? AND device_id=? AND julianday(expires_at)>julianday('now')").bind(body.data.sessionId, node.id).first();
+  if (!session) throw new ApiError(404, "signal_session_not_found", "WebRTC session is unavailable");
+  return c.json({ iceServers: await issueIceServers(c.env) });
 });
 
 router.post("/:id/webrtc/sessions", async (c) => {

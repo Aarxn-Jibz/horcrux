@@ -5,8 +5,8 @@ export class HorcruxPeer {
   readonly channel: RTCDataChannel;
   private closed = false;
   private constructor(connection: RTCPeerConnection, channel: RTCDataChannel) { this.connection = connection; this.channel = channel; }
-  static async connect(nodeId: string, iceServers: RTCIceServer[] = []) {
-    const session = await createWebRtcSession(nodeId); const connection = new RTCPeerConnection({ iceServers }); const channel = connection.createDataChannel("horcrux", { ordered: true }); const peer = new HorcruxPeer(connection, channel);
+  static async connect(nodeId: string) {
+    const session = await createWebRtcSession(nodeId); const connection = new RTCPeerConnection({ iceServers: session.iceServers }); const channel = connection.createDataChannel("horcrux", { ordered: true }); const peer = new HorcruxPeer(connection, channel);
     // Register before applying the answer: on a local/LAN path ICE and DTLS can
     // complete synchronously enough to otherwise miss the open event.
     const opened = peer.waitForOpen(); void opened.catch(() => {});

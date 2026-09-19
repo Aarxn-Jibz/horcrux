@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright-core";
 import { encodeBase64Url } from "../packages/protocol/src";
+import { nodeBinary } from "./node-binary";
 
 type Process = ReturnType<typeof Bun.spawn>;
 type Node = { directory: string; process: Process; id?: string };
@@ -70,11 +71,8 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
         ? new Response(Bun.file(bundle), { headers: { "Content-Type": "text/javascript" } })
         : new Response("<!doctype html><title>Horcrux WebRTC integration</title>", { headers: { "Content-Type": "text/html" } });
     } });
-    console.log("webrtc e2e: building nodes");
     session = await request<Session>("/auth/register", { method: "POST", body: JSON.stringify({ email: `webrtc-${crypto.randomUUID()}@example.com`, password: "browser-webrtc-correct-horse" }) }, false);
-
-    const binary = join(root, "horcrux-node");
-    await run(["go", "build", "-modcacherw", "-ldflags", "-s -w", "-o", binary, "./cmd/horcrux-node"], "apps/node");
+    const binary = await nodeBinary();
     console.log("webrtc e2e: starting node processes");
     const ports = await Promise.all([reservePort(), reservePort()]);
     nodes = await Promise.all(ports.map(async (port, index) => {
