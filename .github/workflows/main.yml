@@ -230,6 +230,16 @@ jobs:
           AUTH_PEPPER: ${{ secrets.AUTH_PEPPER }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      - run: printf %s "$TURN_KEY_ID" | bun --cwd apps/api wrangler secret put TURN_KEY_ID
+        env:
+          TURN_KEY_ID: ${{ secrets.TURN_KEY_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      - run: printf %s "$TURN_API_TOKEN" | bun --cwd apps/api wrangler secret put TURN_API_TOKEN
+        env:
+          TURN_API_TOKEN: ${{ secrets.TURN_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       - run: bun --cwd apps/api wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
