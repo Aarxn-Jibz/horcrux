@@ -9,6 +9,7 @@ class Channel {
 
   addEventListener(type: string, listener: (event: Event) => void) { (this.listeners.get(type) ?? this.listeners.set(type, new Set()).get(type)!).add(listener); }
   removeEventListener(type: string, listener: (event: Event) => void) { this.listeners.get(type)?.delete(listener); }
+  listenerCount(type: string) { return this.listeners.get(type)?.size ?? 0; }
   close() { this.readyState = "closed"; this.emit("close", {}); }
   send(value: string | Uint8Array) {
     if (typeof value !== "string") return;
@@ -59,6 +60,7 @@ test("WebRTC upload fails promptly when a backpressured channel closes", async (
   const channel = new Channel(); channel.bufferedAmount = 64 * 1024 * 4;
   const transport = new WebRtcShardTransport(async () => ({ channel: channel as unknown as RTCDataChannel, close: () => channel.close() }), async () => "capability");
   const upload = transport.putShard("node-1", "file-1/object-1", new Uint8Array([1]));
-  queueMicrotask(() => channel.close());
-  await expect(upload).rejects.toThrow("data channel");
+  while (channel.listenerCount("close") === 0) await new Promise((resolve) => queueMicrotask(resolve));
+  channel.close();
+  await expect(upload).rejects.toThrow("closed while backpressured");
 });
