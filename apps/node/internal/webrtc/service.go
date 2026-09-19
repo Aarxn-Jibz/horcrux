@@ -38,6 +38,7 @@ func (s *Service) poll(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	s.Manager.CloseExcept(sessions)
 	for _, id := range sessions {
 		signals, err := s.Signals.Exchange(ctx, id, nil)
 		if err != nil {

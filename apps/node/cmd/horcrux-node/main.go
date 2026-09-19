@@ -167,7 +167,9 @@ func run(configuration config.Config, nodeIdentity *identity.Identity) {
 			return objectStore.Delete(ctx, task.ObjectID)
 		}, OnError: func(err error) { slog.Warn("heartbeat failed", "error", err) }, OnSuccess: func() { connected.Do(func() { slog.Info("connected; waiting for storage requests") }) }}
 		go reporter.Run(shutdownContext)
-		go (&webrtcnode.Service{Manager: webrtcnode.NewManager(nil), Signals: &webrtcnode.SignalingClient{ControlPlaneURL: configuration.ControlPlaneURL, NodeID: nodeIdentity.NodeID, Signer: nodeIdentity}, NodeID: nodeIdentity.NodeID, Store: objectStore, Verifier: verifier, Signer: nodeIdentity}).Run(shutdownContext)
+		if configuration.Transport == "webrtc" {
+			go (&webrtcnode.Service{Manager: webrtcnode.NewManager(nil), Signals: &webrtcnode.SignalingClient{ControlPlaneURL: configuration.ControlPlaneURL, NodeID: nodeIdentity.NodeID, Signer: nodeIdentity}, NodeID: nodeIdentity.NodeID, Store: objectStore, Verifier: verifier, Signer: nodeIdentity}).Run(shutdownContext)
+		}
 	}
 	go func() {
 		<-shutdownContext.Done()
@@ -175,7 +177,7 @@ func run(configuration config.Config, nodeIdentity *identity.Identity) {
 		defer cancel()
 		_ = daemon.Shutdown(request)
 	}()
-	slog.Info("horcrux node listening", "node_id", nodeIdentity.NodeID, "address", configuration.ListenAddress, "advertise_url", configuration.AdvertiseURL, "data", configuration.DataDirectory)
+	slog.Info("horcrux node listening", "node_id", nodeIdentity.NodeID, "transport", configuration.Transport, "address", configuration.ListenAddress, "advertise_url", configuration.AdvertiseURL, "data", configuration.DataDirectory)
 	if err := daemon.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		fatal("node stopped unexpectedly", err)
 	}

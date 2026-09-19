@@ -62,6 +62,7 @@ func (m *Manager) AcceptOffer(ctx context.Context, sessionID, encoded string, on
 		}
 		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
 			m.Close(sessionID)
+			_ = connection.Close() // The peer may fail before it is entered in m.peers.
 		}
 	})
 	if debug {
@@ -119,6 +120,25 @@ func (m *Manager) CloseAll() {
 	ids := make([]string, 0, len(m.peers))
 	for id := range m.peers {
 		ids = append(ids, id)
+	}
+	m.mu.Unlock()
+	for _, id := range ids {
+		m.Close(id)
+	}
+}
+
+// CloseExcept drops peers whose signaling sessions have expired or disappeared.
+func (m *Manager) CloseExcept(sessionIDs []string) {
+	active := make(map[string]struct{}, len(sessionIDs))
+	for _, id := range sessionIDs {
+		active[id] = struct{}{}
+	}
+	m.mu.Lock()
+	ids := make([]string, 0)
+	for id := range m.peers {
+		if _, ok := active[id]; !ok {
+			ids = append(ids, id)
+		}
 	}
 	m.mu.Unlock()
 	for _, id := range ids {

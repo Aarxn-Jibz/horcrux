@@ -62,7 +62,12 @@ function drain(channel: RTCDataChannel) {
   if (channel.readyState !== "open") return Promise.reject(new Error("WebRTC data channel is not open"));
   if (channel.bufferedAmount < CHUNK * 4) return Promise.resolve();
   channel.bufferedAmountLowThreshold = CHUNK * 2;
-  return new Promise<void>((resolve, reject) => { const timer = setTimeout(() => reject(new Error("WebRTC data channel remained backpressured")), TIMEOUT); channel.addEventListener("bufferedamountlow", () => { clearTimeout(timer); resolve(); }, { once: true }); });
+  return new Promise<void>((resolve, reject) => {
+    const finish = (callback: () => void) => { clearTimeout(timer); channel.removeEventListener("bufferedamountlow", low); channel.removeEventListener("close", closed); channel.removeEventListener("error", closed); callback(); };
+    const low = () => finish(resolve); const closed = () => finish(() => reject(new Error("WebRTC data channel closed while backpressured")));
+    const timer = setTimeout(() => finish(() => reject(new Error("WebRTC data channel remained backpressured"))), TIMEOUT);
+    channel.addEventListener("bufferedamountlow", low, { once: true }); channel.addEventListener("close", closed, { once: true }); channel.addEventListener("error", closed, { once: true });
+  });
 }
 function waitForControl(channel: RTCDataChannel, expected: string) {
   return new Promise<Control>((resolve, reject) => {
@@ -91,7 +96,7 @@ function incoming(channel: RTCDataChannel, signal?: AbortSignal, closeConnection
   channel.addEventListener("message", message); channel.addEventListener("close", onClose, { once: true });
   return {
     async *[Symbol.asyncIterator]() {
-      try { while (!done || queue.length) { if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError"); if (error) throw error; const chunk = queue.shift(); if (chunk) yield chunk; else await new Promise<void>((resolve) => { wake = resolve; signal?.addEventListener("abort", () => resolve(), { once: true }); }); } }
+      try { while (!done || queue.length) { if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError"); if (error) throw error; const chunk = queue.shift(); if (chunk) yield chunk; else await new Promise<void>((resolve) => { const abort = () => finish(); const finish = () => { clearTimeout(timer); signal?.removeEventListener("abort", abort); wake = undefined; resolve(); }; const timer = setTimeout(() => { error = new Error("WebRTC shard stream stalled"); finish(); }, TIMEOUT); wake = finish; signal?.addEventListener("abort", abort, { once: true }); }); } }
       finally { channel.removeEventListener("message", message); channel.removeEventListener("close", onClose); closeConnection(); }
     },
   };
