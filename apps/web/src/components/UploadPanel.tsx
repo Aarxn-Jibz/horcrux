@@ -66,7 +66,7 @@ export function UploadPanel({ onComplete }: { onComplete(): void }) {
           <span>{file ? formatBytes(file.size) : "Maximum 256 MiB"}</span>
         </label>
         {stage && <ProgressSteps current={stage} />}
-        <details className="advanced-details transfer-details"><summary>Advanced details</summary><p>Mode: {storageMode === "http" ? "enrolled HTTP nodes" : "browser mock"} · zstd level 3 · AES-256-GCM · RS 3+2 · Shamir 3-of-5{stage ? ` · Active: ${stage.replace("-", " ")}` : ""}</p><TimingSummary detail={timing} /></details>
+        <details className="advanced-details transfer-details"><summary>Advanced details</summary><p>Mode: {storageMode === "http" ? "enrolled HTTP nodes" : storageMode === "webrtc" ? "direct WebRTC nodes" : "browser mock"} · zstd level 3 · AES-256-GCM · RS 3+2 · Shamir 3-of-5{stage ? ` · Active: ${stage.replace("-", " ")}` : ""}</p><TimingSummary detail={timing} /></details>
         {error && <OperationError error={error} />}
         <button className="primary upload-submit" disabled={!file || Boolean(stage)} onClick={upload}>Secure and distribute</button>
       </section>

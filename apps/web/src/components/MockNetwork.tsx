@@ -60,7 +60,7 @@ export function MockNetwork() {
                 <tr key={node.id}>
                   <td><div className="device-name"><span className="device-glyph" aria-hidden="true" /><span><strong>{node.name}</strong><small>{isMock ? "Browser mock" : "Laptop node"}</small></span></div></td>
                   <td><span className={`status status-${isOffline ? "offline" : state}`}><span className="status-dot" />{isOffline ? "Offline" : state}</span></td>
-                  <td className="mono">{isMock ? "IndexedDB" : node.endpoint ?? "Awaiting heartbeat"}</td>
+                  <td className="mono">{isMock ? "IndexedDB" : node.endpoint ?? (node.transport === "webrtc" ? "WebRTC (no HTTP endpoint)" : "Awaiting heartbeat")}</td>
                   <td><div className="capacity"><span>{formatBytes(node.storageUsed)} / {formatBytes(node.storageCapacity)}</span><progress className="capacity-track" max={100} value={used} aria-label={`${used}% storage used`} /></div></td>
                   <td className="capitalize">{simulatedOffline ? "unavailable" : node.health ?? (isOffline ? "unknown" : "healthy")}</td>
                   <td title={node.lastSeen ?? undefined}>{relativeLastSeen(node.lastSeen, isMock)}</td>

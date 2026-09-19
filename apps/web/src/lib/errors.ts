@@ -5,6 +5,8 @@ export interface DisplayError {
 
 const messages: Array<[RegExp, string]> = [
   [/storage node .*unavailable|connection.*failed/i, "A storage device is unavailable. Check Devices and try again."],
+  [/webrtc answer timed out|signal.*session|signaling/i, "WebRTC signaling did not reach the device. Check that it is online, then retry."],
+  [/ice .*timed out|data channel|shard stream stalled/i, "The direct WebRTC connection was interrupted. Check the device's network connection, then retry."],
   [/insufficient reed-solomon shards/i, "Not enough healthy devices are reachable to reconstruct this file."],
   [/insufficient shamir shares/i, "Not enough key shares are available to unlock this file."],
   [/integrity verification|checksum|corrupt/i, "Integrity verification failed. One or more stored objects may be corrupt."],
