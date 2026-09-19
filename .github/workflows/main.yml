@@ -225,6 +225,11 @@ jobs:
         with:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
+      - run: printf %s "$AUTH_PEPPER" | bun --cwd apps/api wrangler secret put AUTH_PEPPER
+        env:
+          AUTH_PEPPER: ${{ secrets.AUTH_PEPPER }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       - run: bun --cwd apps/api wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

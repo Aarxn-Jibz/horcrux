@@ -49,7 +49,9 @@ the Cloudflare account from the token, add the correct account ID to the
 existing Wrangler configuration rather than adding it as a CI secret.
 
 `JWT_SECRET` and `CAPABILITY_PRIVATE_KEY` are Worker runtime secrets. Keep them
-in Cloudflare with `wrangler secret put`; do not place them in GitHub. The
+in Cloudflare with `wrangler secret put`; do not place them in GitHub. Add a
+random `AUTH_PEPPER` as a secret in `production-d1-migrations`; the API deploy
+job copies it to the Worker before deployment. The
 checked-in Worker configuration already supplies `WEB_ORIGIN` and
 `CAPABILITY_PUBLIC_KEY`.
 

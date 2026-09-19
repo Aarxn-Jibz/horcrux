@@ -1,6 +1,7 @@
 import type { ChunkedManifest } from "@horcrux-file-system/core";
 import type { FileManifest, FileSummary, StorageNodeContract } from "@horcrux-file-system/shared";
 import type { CapabilityRequest } from "@horcrux-file-system/storage";
+import { deriveCredential, freshKdf, type Kdf } from "./auth-credential";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8787";
 let accessToken: string | null = null;
@@ -15,7 +16,11 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
   return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }
 export function authenticatedRequest<T>(path: string, init: RequestInit = {}) { return request<T>(path, init); }
-async function session(path: "/auth/login" | "/auth/register", email: string, password: string) { const result = await request<{ accessToken: string; user: User }>(path, { method: "POST", body: JSON.stringify({ email, password }) }, false); accessToken = result.accessToken; return result.user; }
+async function session(path: "/auth/login" | "/auth/register", email: string, password: string) {
+  const kdf = path === "/auth/register" ? freshKdf() : (await request<{ kdf: Kdf }>("/auth/challenge", { method: "POST", body: JSON.stringify({ email }) }, false)).kdf;
+  const credential = await deriveCredential(password, kdf);
+  const result = await request<{ accessToken: string; user: User }>(path, { method: "POST", body: JSON.stringify(path === "/auth/register" ? { email, credential, kdf } : { email, credential }) }, false); accessToken = result.accessToken; return result.user;
+}
 export const login = (email: string, password: string) => session("/auth/login", email, password);
 export const register = (email: string, password: string) => session("/auth/register", email, password);
 export function refresh() {

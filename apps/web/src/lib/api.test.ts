@@ -9,6 +9,7 @@ describe("API refresh coordination", () => {
     let refreshes = 0;
     globalThis.fetch = (async (input, init) => {
       const path = new URL(String(input)).pathname;
+      if (path === "/auth/challenge") return Response.json({ kdf: { version: "pbkdf2-sha256-v1", iterations: 310000, salt: "AAAAAAAAAAAAAAAAAAAAAA==" } });
       if (path === "/auth/login") return Response.json({ accessToken: "old", user: { id: "user-a", email: "a@example.com" } });
       if (path === "/auth/refresh") { refreshes++; await new Promise((resolve) => setTimeout(resolve, 5)); return Response.json({ accessToken: "new", user: { id: "user-a", email: "a@example.com" } }); }
       if (new Headers(init?.headers).get("Authorization") === "Bearer old") return new Response("", { status: 401 });
@@ -23,6 +24,7 @@ describe("API refresh coordination", () => {
     const authorizations: Array<string | null> = [];
     globalThis.fetch = (async (input, init) => {
       const path = new URL(String(input)).pathname;
+      if (path === "/auth/challenge") return Response.json({ kdf: { version: "pbkdf2-sha256-v1", iterations: 310000, salt: "AAAAAAAAAAAAAAAAAAAAAA==" } });
       if (path === "/auth/login") return Response.json({ accessToken: "old", user: { id: "user-a", email: "a@example.com" } });
       if (path === "/auth/refresh") return new Response("", { status: 401 });
       authorizations.push(new Headers(init?.headers).get("Authorization"));
