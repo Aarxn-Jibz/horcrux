@@ -55,7 +55,7 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
     const privateKey = encodeBase64Url(new Uint8Array(await crypto.subtle.exportKey("pkcs8", keyPair.privateKey)));
     const publicKey = encodeBase64Url(new Uint8Array(await crypto.subtle.exportKey("raw", keyPair.publicKey)));
     const environmentFile = join(root, "api.env");
-    await Bun.write(environmentFile, `JWT_SECRET=webrtc-test-${crypto.randomUUID()}\nWEB_ORIGIN=${webUrl}\nCAPABILITY_PRIVATE_KEY=${privateKey}\nCAPABILITY_PUBLIC_KEY=${publicKey}\n`);
+    await Bun.write(environmentFile, `JWT_SECRET=webrtc-test-${crypto.randomUUID()}\nWEB_ORIGIN=${webUrl}\nCAPABILITY_PRIVATE_KEY=${privateKey}\nCAPABILITY_PUBLIC_KEY=${publicKey}\nTURN_KEY_ID=test-key\nTURN_API_TOKEN=test-only-token\nTURN_CREDENTIALS_URL=${webUrl}/turn-credentials\n`);
     const persistence = join(root, "d1");
     console.log("webrtc e2e: migrating local D1");
     await run(["./node_modules/.bin/wrangler", "d1", "migrations", "apply", "horcrux-file-system", "--local", "--persist-to", persistence], "apps/api");
@@ -67,7 +67,9 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
     const built = await Bun.build({ entrypoints: [join(process.cwd(), "packages/storage/src/webrtc.ts")], outdir: root, naming: "webrtc-transport.js", target: "browser", format: "esm" });
     if (!built.success) throw new Error(`Could not build browser transport: ${built.logs.map((log) => log.message).join("; ")}`);
     web = Bun.serve({ hostname: "127.0.0.1", port: webPort, fetch(request) {
-      return new URL(request.url).pathname === "/webrtc-transport.js"
+      return new URL(request.url).pathname === "/turn-credentials"
+        ? Response.json({ iceServers: [{ urls: ["stun:stun.example.test:3478"] }] })
+        : new URL(request.url).pathname === "/webrtc-transport.js"
         ? new Response(Bun.file(bundle), { headers: { "Content-Type": "text/javascript" } })
         : new Response("<!doctype html><title>Horcrux WebRTC integration</title>", { headers: { "Content-Type": "text/html" } });
     } });
@@ -135,8 +137,8 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
       });
       const connect = async (nodeId: string) => {
         console.log(`creating signaling session for ${nodeId}`);
-        const session = await request<{ sessionId: string }>("/webrtc/sessions", { nodeId });
-        const peer = new RTCPeerConnection({ iceServers: [] }); peers.push(peer);
+        const session = await request<{ sessionId: string; iceServers: RTCIceServer[] }>("/webrtc/sessions", { nodeId });
+        const peer = new RTCPeerConnection({ iceServers: session.iceServers }); peers.push(peer);
         const channel = peer.createDataChannel("horcrux", { ordered: true }); channel.binaryType = "arraybuffer";
         peer.onicegatheringstatechange = () => console.log(`ICE gathering ${nodeId}: ${peer.iceGatheringState}`);
         peer.oniceconnectionstatechange = () => console.log(`ICE connection ${nodeId}: ${peer.iceConnectionState}`);
@@ -198,7 +200,7 @@ describe("Chromium browser and Pion node WebRTC data plane", () => {
       const { WebRtcShardTransport } = await import(/* @vite-ignore */ storagePath) as typeof import("../packages/storage/src/webrtc");
       const request = async <T>(path: string, body?: unknown, method = "POST") => { const response = await fetch(`${apiUrl}${path}`, { method, headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) }, body: body === undefined ? undefined : JSON.stringify(body) }); if (!response.ok) throw new Error(`${path}: ${response.status}`); return response.json() as Promise<T>; };
       const connect = async (target: string) => {
-        const session = await request<{ sessionId: string }>("/webrtc/sessions", { nodeId: target }); const peer = new RTCPeerConnection(); const channel = peer.createDataChannel("horcrux", { ordered: true }); channel.binaryType = "arraybuffer";
+        const session = await request<{ sessionId: string; iceServers: RTCIceServer[] }>("/webrtc/sessions", { nodeId: target }); const peer = new RTCPeerConnection({ iceServers: session.iceServers }); const channel = peer.createDataChannel("horcrux", { ordered: true }); channel.binaryType = "arraybuffer";
         peer.onicegatheringstatechange = () => console.log(`ICE gathering ${target}: ${peer.iceGatheringState}`); peer.oniceconnectionstatechange = () => console.log(`ICE connection ${target}: ${peer.iceConnectionState}`); peer.onconnectionstatechange = () => console.log(`peer connection ${target}: ${peer.connectionState}`); peer.onicecandidate = ({ candidate }) => console.log(`local ICE candidate ${target}: ${candidate?.candidate ?? "end-of-candidates"}`);
         const opened = new Promise<void>((resolve, reject) => { const finish = (callback: () => void) => { clearTimeout(timer); channel.removeEventListener("open", open); channel.removeEventListener("error", fail); channel.removeEventListener("close", fail); callback(); }; const open = () => { console.log(`channel open ${target}`); finish(resolve); }; const fail = () => finish(() => reject(new Error(`DataChannel failed to open for ${target}`))); const timer = setTimeout(() => finish(() => reject(new Error(`DataChannel open timed out for ${target}`))), 30_000); channel.addEventListener("open", open, { once: true }); channel.addEventListener("error", fail, { once: true }); channel.addEventListener("close", fail, { once: true }); });
         await peer.setLocalDescription(await peer.createOffer()); if (peer.iceGatheringState !== "complete") await new Promise<void>((resolve) => peer.addEventListener("icegatheringstatechange", () => peer.iceGatheringState === "complete" && resolve()));
