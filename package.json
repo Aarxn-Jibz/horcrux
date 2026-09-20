@@ -18,6 +18,7 @@
     "test:webrtc": "bun test integration/webrtc-chromium.test.ts",
     "test:large-file": "HORCRUX_LARGE_FILE_BYTES=1073741824 bun test integration/five-node-http-cluster.test.ts",
     "test:e2e": "bun run scripts/e2e-local.ts",
+    "demo:local": "bun run scripts/demo-local.ts",
     "keys:generate": "bun run scripts/generate-capability-keys.ts",
     "db:migrate:local": "bun --cwd apps/api db:migrate:local"
   },

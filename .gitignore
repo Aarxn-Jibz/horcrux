@@ -9,3 +9,4 @@ coverage/
 /apps/node/horcrux-node
 .tmp-webrtc-*/
 .integration-cache/
+.demo-local/
