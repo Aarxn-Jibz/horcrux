@@ -109,6 +109,13 @@ describe("v2 chunked file format", () => {
     await expect(instance.downloadTo(manifest, () => {})).rejects.toThrow("Insufficient Shamir shares");
   }, 120_000);
 
+  test("does not wait for an unavailable key-share before using three reachable shares", async () => {
+    const storage = new DelayedShareTransport(nodes, "a"); const input = generated(1); const instance = pipeline(storage);
+    const manifest = await instance.upload({ fileId: crypto.randomUUID(), name: "parallel-shares.bin", mimeType: "application/octet-stream", size: input.byteLength, source: source(input) }, { dataShards: 3, parityShards: 2, keyShares: 5, keyThreshold: 3 }, nodes);
+    const started = performance.now(); await instance.downloadTo(manifest, () => {});
+    expect(performance.now() - started).toBeLessThan(100); expect(storage.delayed).toBeTrue();
+  });
+
   test("rolls back shard uploads when a sibling stream fails", async () => {
     const storage = new FailingChunkedTransport(nodes, "b");
     const instance = pipeline(storage);
@@ -139,6 +146,18 @@ class OpenFailingTransport extends MemoryShardTransport {
   failures = 0;
   constructor(nodes: readonly string[], private readonly failingNodes: Set<string>) { super(nodes); }
   override async getShardStream(nodeId: string, objectId: string, signal?: AbortSignal, start = 0) { if (this.failingNodes.has(nodeId)) { this.failures += 1; throw new Error("simulated stream open failure"); } return super.getShardStream(nodeId, objectId, signal, start); }
+}
+
+class DelayedShareTransport extends MemoryShardTransport {
+  delayed = false;
+  constructor(nodes: readonly string[], private readonly delayedNode: string) { super(nodes); }
+  override async getShard(nodeId: string, objectId: string, signal?: AbortSignal) {
+    if (nodeId !== this.delayedNode || !objectId.includes("/key-share/")) return super.getShard(nodeId, objectId, signal);
+    this.delayed = true;
+    await new Promise<void>((resolve) => setTimeout(resolve, 250));
+    if (signal?.aborted) throw signal.reason;
+    return super.getShard(nodeId, objectId, signal);
+  }
 }
 
 class MissingObjectOpenTransport extends MemoryShardTransport {

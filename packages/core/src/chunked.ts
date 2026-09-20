@@ -136,9 +136,14 @@ export class ChunkedFilePipeline {
 
   private async retrieveShares(manifest: ChunkedManifest) {
     const shares: Uint8Array[] = [];
-    for (const object of manifest.objects.filter((item) => item.kind === "key-share")) {
-      try { const share = await this.storage.getShard(object.nodeId, object.objectId); if (new Sha256Stream().update(share).hex() === object.checksum) shares.push(share); if (shares.length >= manifest.keyShareThreshold) return shares; } catch { /* try another physical node */ }
+    const controller = new AbortController();
+    const pending = new Map(manifest.objects.filter((item) => item.kind === "key-share").map((object, index) => [index, this.storage.getShard(object.nodeId, object.objectId, controller.signal).then((share) => ({ index, object, share })).catch(() => ({ index, object }))]));
+    while (pending.size && shares.length < manifest.keyShareThreshold) {
+      const result = await Promise.race(pending.values()); pending.delete(result.index);
+      if ("share" in result && new Sha256Stream().update(result.share).hex() === result.object.checksum) shares.push(result.share);
     }
+    controller.abort();
+    if (shares.length >= manifest.keyShareThreshold) return shares;
     shares.forEach((share) => share.fill(0)); throw new Error(`Insufficient Shamir shares: need ${manifest.keyShareThreshold}`);
   }
 
