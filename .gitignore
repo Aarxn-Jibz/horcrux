@@ -10,3 +10,4 @@ coverage/
 .tmp-webrtc-*/
 .integration-cache/
 .demo-local/
+.demo-production/

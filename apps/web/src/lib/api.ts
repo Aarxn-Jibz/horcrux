@@ -30,6 +30,7 @@ export function refresh() {
 export async function logout() { await request<void>("/auth/logout", { method: "POST" }, false).catch(() => {}); accessToken = null; }
 export async function listFiles() { return (await request<{ files: FileSummary[] }>("/files")).files; }
 export async function listDevices() { return (await request<{ devices: StorageNodeContract[] }>("/devices")).devices; }
+export function createEnrollmentChallenge() { return request<{ joinToken: string; expiresAt: string }>("/devices/enrollment-challenges", { method: "POST" }); }
 export function initializeFile(body: unknown) { return request<{ fileId: string; uploadSessionId: string; nodes: StorageNodeContract[] }>("/files/init", { method: "POST", body: JSON.stringify(body) }); }
 export function updateUploadState(fileId: string, status: "distributing" | "aborted") { return request<void>(`/files/${fileId}/state`, { method: "POST", body: JSON.stringify({ status }) }); }
 export function completeFile(fileId: string, manifest: FileManifest | ChunkedManifest) {

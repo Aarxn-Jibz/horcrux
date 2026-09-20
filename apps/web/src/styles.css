@@ -176,6 +176,9 @@ header { display: flex; height: 56px; align-items: center; justify-content: spac
 .status-degraded, .status-deleting { color: var(--warning); }
 .status-failed, .status-offline { color: var(--error); }
 .status-deleted { color: var(--text-muted); }
+.device-enrollment { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); flex-wrap: wrap; }
+.device-enrollment p { margin: 0; color: var(--text-muted); font-size: .8125rem; }
+.device-enrollment code { max-width: 100%; overflow: auto; padding: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-tertiary); font-size: .75rem; }
 .empty-state { display: grid; min-height: 320px; place-items: center; align-content: center; text-align: center; }
 .empty-state h2 { margin: var(--space-4) 0 var(--space-1); }
 .empty-state p { margin: 0; color: var(--text-muted); font-size: .8125rem; }

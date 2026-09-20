@@ -19,6 +19,7 @@
     "test:large-file": "HORCRUX_LARGE_FILE_BYTES=1073741824 bun test integration/five-node-http-cluster.test.ts",
     "test:e2e": "bun run scripts/e2e-local.ts",
     "demo:local": "bun run scripts/demo-local.ts",
+    "demo:production": "bash scripts/demo-production.sh",
     "keys:generate": "bun run scripts/generate-capability-keys.ts",
     "db:migrate:local": "bun --cwd apps/api db:migrate:local"
   },

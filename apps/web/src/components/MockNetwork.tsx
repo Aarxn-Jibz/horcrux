@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { StorageNodeContract } from "@horcrux-file-system/shared";
-import { listDevices } from "../lib/api";
+import { createEnrollmentChallenge, listDevices } from "../lib/api";
 import { mockStorage } from "../lib/pipeline";
 import { formatBytes } from "./FileList";
 
@@ -25,6 +25,9 @@ export function MockNetwork() {
   const [nodes, setNodes] = useState<StorageNodeContract[]>([]);
   const [offline, setOffline] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
+  const [joinCommand, setJoinCommand] = useState("");
+  const [nodeNumber, setNodeNumber] = useState(1);
+  const [nodeName, setNodeName] = useState("Demo node 1");
 
   useEffect(() => {
     listDevices().then(setNodes).catch((cause) => setError(cause instanceof Error ? cause.message : "Could not load devices"));
@@ -40,12 +43,27 @@ export function MockNetwork() {
     });
   }
 
+  async function addDevice() {
+    setError("");
+    try {
+      const { joinToken } = await createEnrollmentChallenge();
+      const name = nodeName.replaceAll("'", "'\\\"'\\\"'");
+      setJoinCommand(`horcrux-node join '${joinToken}' --name '${name}' --config-dir "$HOME/.config/Horcrux-demo/node-${nodeNumber}" --storage-dir "$HOME/.local/share/Horcrux-demo/node-${nodeNumber}"`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not create enrollment token"); }
+  }
+
   return (
     <>
       {nodes.some((node) => node.kind !== "laptop") && (
         <div className="development-notice"><strong>Development simulation</strong><span>Rows marked Browser mock are IndexedDB partitions in this browser, not physical laptops.</span></div>
       )}
       {error && <p className="error" role="alert">{error}</p>}
+      <div className="device-enrollment">
+        <label>Node <input type="number" min="1" max="5" value={nodeNumber} onChange={(event) => { const number = Math.max(1, Math.min(5, Number(event.target.value) || 1)); setNodeNumber(number); setNodeName(`Demo node ${number}`); }} /></label>
+        <label>Name <input value={nodeName} onChange={(event) => setNodeName(event.target.value)} /></label>
+        <button className="primary" onClick={addDevice}>Add device</button>
+        {joinCommand && <><p>Run this once per laptop node. Tokens expire in 10 minutes.</p><code>{joinCommand}</code><button className="secondary" onClick={() => navigator.clipboard.writeText(joinCommand)}>Copy command</button></>}
+      </div>
       <section className="data-panel" aria-label="Storage devices">
         <table className="data-table device-table">
           <thead><tr><th>Device</th><th>State</th><th>Endpoint</th><th>Storage</th><th>Health</th><th>Last seen</th><th>Version</th><th><span className="sr-only">Actions</span></th></tr></thead>
