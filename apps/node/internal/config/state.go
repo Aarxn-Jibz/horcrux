@@ -60,12 +60,13 @@ func ParseJoin(args []string) (Config, JoinToken, string, error) {
 		return Config{}, JoinToken{}, "", err
 	}
 	set := flag.NewFlagSet("join", flag.ContinueOnError)
-	configDirectory, serverURL, name := defaults, "", "Horcrux laptop"
+	configDirectory, serverURL, name, listen := defaults, "", "Horcrux laptop", "127.0.0.1:9443"
 	capacity := int64(100 * 1024 * 1024 * 1024)
 	set.StringVar(&configDirectory, "config-dir", defaults, "directory for node identity and configuration")
 	set.StringVar(&storage, "storage-dir", storage, "directory for stored objects")
 	set.StringVar(&serverURL, "server", "", "control-plane URL")
 	set.StringVar(&name, "name", name, "device display name")
+	set.StringVar(&listen, "listen", listen, "loopback listener address")
 	set.Int64Var(&capacity, "capacity-bytes", capacity, "maximum object bytes")
 	if err := set.Parse(args[1:]); err != nil {
 		return Config{}, JoinToken{}, "", err
@@ -80,7 +81,7 @@ func ParseJoin(args []string) (Config, JoinToken, string, error) {
 	if serverURL != "" {
 		token.ControlPlaneURL = serverURL
 	}
-	config := Config{Transport: "webrtc", ListenAddress: "127.0.0.1:9443", DataDirectory: storage, CapacityBytes: capacity, MaxConcurrent: DefaultMaxConcurrent, ControlPlanePublicKey: token.ControlPlanePublicKey, ControlPlaneURL: token.ControlPlaneURL, HeartbeatInterval: 30 * time.Second, NodeName: name, WebOrigin: "http://localhost:5173"}
+	config := Config{Transport: "webrtc", ListenAddress: listen, DataDirectory: storage, CapacityBytes: capacity, MaxConcurrent: DefaultMaxConcurrent, ControlPlanePublicKey: token.ControlPlanePublicKey, ControlPlaneURL: token.ControlPlaneURL, HeartbeatInterval: 30 * time.Second, NodeName: name, WebOrigin: "http://localhost:5173"}
 	if err := validate(config); err != nil {
 		return Config{}, JoinToken{}, "", err
 	}

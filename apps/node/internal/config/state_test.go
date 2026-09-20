@@ -18,11 +18,11 @@ func TestJoinTokenAndSavedConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	config, token, directory, err := ParseJoin([]string{base64.RawURLEncoding.EncodeToString(encoded), "--config-dir", t.TempDir(), "--storage-dir", t.TempDir()})
+	config, token, directory, err := ParseJoin([]string{base64.RawURLEncoding.EncodeToString(encoded), "--config-dir", t.TempDir(), "--storage-dir", t.TempDir(), "--listen", "127.0.0.1:9444"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if token.Token != "one-time-token" || config.Transport != "webrtc" {
+	if token.Token != "one-time-token" || config.Transport != "webrtc" || config.ListenAddress != "127.0.0.1:9444" {
 		t.Fatalf("unexpected join configuration: %#v", config)
 	}
 	if err := Save(directory, config); err != nil {

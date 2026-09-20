@@ -48,7 +48,7 @@ export function MockNetwork() {
     try {
       const { joinToken } = await createEnrollmentChallenge();
       const name = nodeName.replaceAll("'", "'\\\"'\\\"'");
-      setJoinCommand(`horcrux-node join '${joinToken}' --name '${name}' --config-dir "$HOME/.config/Horcrux-demo/node-${nodeNumber}" --storage-dir "$HOME/.local/share/Horcrux-demo/node-${nodeNumber}"`);
+      setJoinCommand(`horcrux-node join '${joinToken}' --name '${name}' --listen '127.0.0.1:${9442 + nodeNumber}' --config-dir "$HOME/.config/Horcrux-demo/node-${nodeNumber}" --storage-dir "$HOME/.local/share/Horcrux-demo/node-${nodeNumber}"`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not create enrollment token"); }
   }
 
