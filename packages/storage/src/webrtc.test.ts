@@ -34,7 +34,20 @@ test("WebRTC transport closes the connection handle after every operation", asyn
   expect(await transport.getShard("node-1", objectId)).toEqual(new Uint8Array([1]));
   await transport.deleteShard("node-1", objectId);
   expect(await transport.healthCheck("node-1")).toBeTrue();
+  transport.close();
   expect(handles.map((handle) => handle.closed)).toEqual([1, 1, 1, 1]);
+});
+
+test("WebRTC transport reuses a healthy probe connection for the next read", async () => {
+  const handles: Array<{ closed: number }> = [];
+  const transport = new WebRtcShardTransport(async () => {
+    const channel = new Channel(); const handle = { channel: channel as unknown as RTCDataChannel, closed: 0, close() { this.closed += 1; channel.close(); } };
+    handles.push(handle); return handle;
+  }, async () => "capability");
+  await expect(transport.healthCheck("node-1")).resolves.toBeTrue();
+  await expect(transport.getShard("node-1", "file-1/object-1")).resolves.toEqual(new Uint8Array([1]));
+  expect(handles).toHaveLength(1);
+  expect(handles[0]!.closed).toBe(1);
 });
 
 test("WebRTC transport closes the connection handle when setup fails", async () => {

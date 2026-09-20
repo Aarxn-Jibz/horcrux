@@ -11,14 +11,17 @@ const TIMEOUT = 30_000;
 
 /** A bounded, ordered DataChannel implementation of the shard transport. */
 export class WebRtcShardTransport implements ShardTransport {
+  private readonly ready = new Map<string, WebRtcConnection>();
   constructor(private readonly connect: Connect, private readonly grant: Grant, private readonly submitReceipt?: SubmitReceipt) {}
+
+  private async takeConnection(nodeId: string) { const connection = this.ready.get(nodeId); if (connection) { this.ready.delete(nodeId); return connection; } return this.connect(nodeId); }
 
   async putShard(nodeId: string, objectId: string, bytes: Uint8Array, options: PutShardOptions = {}): Promise<StoredObjectRef> {
     return this.putShardStream(nodeId, objectId, (async function* () { yield bytes; })(), { ...options, maxSize: bytes.byteLength });
   }
 
   async putShardStream(nodeId: string, objectId: string, stream: ByteStream, options: PutShardOptions & { maxSize: number }): Promise<StoredObjectRef> {
-    const connection = await this.connect(nodeId); const channel = connection.channel;
+    const connection = await this.takeConnection(nodeId); const channel = connection.channel;
     try {
       const capability = await this.grant({ nodeId, fileId: fileId(objectId), objectId, operation: "PUT", maxSize: options.maxSize });
       const receipt = waitForControl(channel, "receipt");
@@ -42,7 +45,7 @@ export class WebRtcShardTransport implements ShardTransport {
   }
 
   async getShardStream(nodeId: string, objectId: string, signal?: AbortSignal, start = 0): Promise<ByteStream> {
-    const connection = await this.connect(nodeId); const channel = connection.channel;
+    const connection = await this.takeConnection(nodeId); const channel = connection.channel;
     try {
       const stream = incoming(channel, signal, () => connection.close());
       await sendControl(channel, { type: "get", objectId, size: start, capability: await this.grant({ nodeId, fileId: fileId(objectId), objectId, operation: "GET" }) });
@@ -51,10 +54,11 @@ export class WebRtcShardTransport implements ShardTransport {
   }
 
   async deleteShard(nodeId: string, objectId: string) {
-    const connection = await this.connect(nodeId); const channel = connection.channel;
+    const connection = await this.takeConnection(nodeId); const channel = connection.channel;
     try { const capability = await this.grant({ nodeId, fileId: fileId(objectId), objectId, operation: "DELETE" }); const complete = waitForControl(channel, "delete-finish"); void complete.catch(() => {}); await sendControl(channel, { type: "delete", objectId, capability }); await complete; } finally { connection.close(); }
   }
-  async healthCheck(nodeId: string) { try { const connection = await this.connect(nodeId); connection.close(); return true; } catch { return false; } }
+  async healthCheck(nodeId: string) { if (this.ready.has(nodeId)) return true; try { this.ready.set(nodeId, await this.connect(nodeId)); return true; } catch { return false; } }
+  close() { for (const connection of this.ready.values()) connection.close(); this.ready.clear(); }
 }
 
 async function sendControl(channel: RTCDataChannel, message: Control) { await drain(channel); channel.send(JSON.stringify(message)); }

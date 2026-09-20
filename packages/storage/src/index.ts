@@ -6,6 +6,8 @@ export interface ShardTransport {
   getShard(nodeId: string, objectId: string, signal?: AbortSignal): Promise<Uint8Array>;
   deleteShard(nodeId: string, objectId: string): Promise<void>;
   healthCheck(nodeId: string): Promise<boolean>;
+  /** Releases any connections retained by an availability probe. */
+  close?(): void | Promise<void>;
   /** Optional bounded-memory object operations used by the v2 striped format. */
   putShardStream?(nodeId: string, objectId: string, bytes: ByteStream, options: PutShardOptions & { maxSize: number }): Promise<StoredObjectRef>;
   /** Starts at an object byte offset when recovery needs to replace a failed stream. */

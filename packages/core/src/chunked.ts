@@ -131,7 +131,7 @@ export class ChunkedFilePipeline {
     } catch (error) {
       if (isFileSink(output)) await output.abort(error).catch(() => {});
       throw error;
-    } finally { await this.closeReaders(readers); key?.fill(0); }
+    } finally { await this.closeReaders(readers); await this.storage.close?.(); key?.fill(0); }
   }
 
   private async retrieveShares(manifest: ChunkedManifest) {
@@ -152,9 +152,10 @@ export class ChunkedFilePipeline {
   }
 
   private async openReaders(objects: ObjectPlacement[], start: number) {
-    const readers: RecordReader[] = [];
-    try { for (const object of objects) readers.push(await this.openReader(object, start)); return readers; }
-    catch (error) { await this.closeReaders(readers); throw error; }
+    const opened = await Promise.allSettled(objects.map((object) => this.openReader(object, start)));
+    const failure = opened.find((result) => result.status === "rejected");
+    if (failure?.status === "rejected") { await this.closeReaders(opened.flatMap((result) => result.status === "fulfilled" ? [result.value] : [])); throw failure.reason; }
+    return opened.map((result) => (result as PromiseFulfilledResult<RecordReader>).value);
   }
 
   private async closeReaders(readers: RecordReader[]) { await Promise.allSettled(readers.map((reader) => reader.cancel())); }

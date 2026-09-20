@@ -48,6 +48,9 @@ func (s *Service) poll(ctx context.Context) {
 			if signal.Type != "offer" {
 				continue
 			}
+			if s.Manager.HasPeer(id) {
+				continue
+			}
 			servers, iceErr := s.Signals.ICE(ctx, id)
 			if iceErr != nil {
 				slog.Debug("webrtc ICE configuration rejected", "error", iceErr)
@@ -95,6 +98,12 @@ func (s *Service) poll(ctx context.Context) {
 					}
 				})
 				channel.OnClose(session.Abort)
+			}, func(payload string) {
+				go func() {
+					if _, err := s.Signals.Exchange(ctx, id, &Signal{Type: "ice-candidate", Payload: payload}); err != nil && os.Getenv("HORCRUX_WEBRTC_DEBUG") == "1" {
+						slog.Debug("webrtc ICE candidate relay rejected", "error", err)
+					}
+				}()
 			})
 			if err == nil {
 				if _, exchangeErr := s.Signals.Exchange(ctx, id, &Signal{Type: "answer", Payload: answer}); exchangeErr != nil {
@@ -104,6 +113,13 @@ func (s *Service) poll(ctx context.Context) {
 				}
 			} else {
 				slog.Debug("webrtc offer rejected", "error", err)
+			}
+		}
+		for _, signal := range signals {
+			if signal.Type == "ice-candidate" {
+				if err := s.Manager.AddICECandidate(id, signal.Payload); err != nil && os.Getenv("HORCRUX_WEBRTC_DEBUG") == "1" {
+					slog.Debug("webrtc ICE candidate rejected", "error", err)
+				}
 			}
 		}
 	}

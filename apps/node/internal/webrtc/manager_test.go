@@ -4,6 +4,9 @@ import "testing"
 
 func TestManagerStartsEmpty(t *testing.T) {
 	manager := NewManager(nil)
+	if manager.HasPeer("missing") {
+		t.Fatal("missing peer reported as present")
+	}
 	if len(manager.peers) != 0 {
 		t.Fatal("unexpected peers")
 	}

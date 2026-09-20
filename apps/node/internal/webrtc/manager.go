@@ -2,21 +2,22 @@ package webrtc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/pion/webrtc/v4"
 )
 
 // Manager owns only short-lived peers created from an authenticated signaling session.
 type Manager struct {
-	mu     sync.Mutex
-	peers  map[string]*webrtc.PeerConnection
-	config webrtc.Configuration
-	api    *webrtc.API
+	mu         sync.Mutex
+	peers      map[string]*webrtc.PeerConnection
+	candidates map[string]map[string]struct{}
+	config     webrtc.Configuration
+	api        *webrtc.API
 }
 
 func NewManager(servers []webrtc.ICEServer) *Manager {
@@ -24,10 +25,17 @@ func NewManager(servers []webrtc.ICEServer) *Manager {
 	// Loopback candidates are intentionally enabled for direct local/LAN
 	// development. Production NAT traversal still relies on configured ICE.
 	engine.SetIncludeLoopbackCandidate(true)
-	return &Manager{peers: map[string]*webrtc.PeerConnection{}, config: webrtc.Configuration{ICEServers: servers}, api: webrtc.NewAPI(webrtc.WithSettingEngine(engine))}
+	return &Manager{peers: map[string]*webrtc.PeerConnection{}, candidates: map[string]map[string]struct{}{}, config: webrtc.Configuration{ICEServers: servers}, api: webrtc.NewAPI(webrtc.WithSettingEngine(engine))}
 }
 
-func (m *Manager) AcceptOffer(ctx context.Context, sessionID, encoded string, servers []webrtc.ICEServer, onChannel func(*webrtc.DataChannel)) (string, error) {
+func (m *Manager) HasPeer(sessionID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, exists := m.peers[sessionID]
+	return exists
+}
+
+func (m *Manager) AcceptOffer(ctx context.Context, sessionID, encoded string, servers []webrtc.ICEServer, onChannel func(*webrtc.DataChannel), onCandidate func(string)) (string, error) {
 	debug := os.Getenv("HORCRUX_WEBRTC_DEBUG") == "1"
 	m.mu.Lock()
 	if _, exists := m.peers[sessionID]; exists {
@@ -67,14 +75,22 @@ func (m *Manager) AcceptOffer(ctx context.Context, sessionID, encoded string, se
 			_ = connection.Close() // The peer may fail before it is entered in m.peers.
 		}
 	})
-	if debug {
-		connection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+	connection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		if candidate != nil {
+			raw, err := json.Marshal(candidate.ToJSON())
+			if err == nil {
+				onCandidate(string(raw))
+			}
+		}
+		if debug {
 			if candidate == nil {
 				slog.Info("webrtc local ICE candidates complete", "session", sessionID)
 				return
 			}
 			slog.Info("webrtc local ICE candidate", "session", sessionID, "candidate", candidate.String())
-		})
+		}
+	})
+	if debug {
 		connection.SCTP().Transport().ICETransport().OnSelectedCandidatePairChange(func(pair *webrtc.ICECandidatePair) {
 			slog.Info("webrtc selected ICE candidate pair", "session", sessionID, "local", pair.Local.String(), "remote", pair.Remote.String())
 		})
@@ -88,30 +104,50 @@ func (m *Manager) AcceptOffer(ctx context.Context, sessionID, encoded string, se
 		connection.Close()
 		return "", err
 	}
-	gathering := webrtc.GatheringCompletePromise(connection)
 	if err := connection.SetLocalDescription(answer); err != nil {
 		connection.Close()
 		return "", err
 	}
-	select {
-	case <-gathering:
-	case <-ctx.Done():
-		connection.Close()
-		return "", ctx.Err()
-	case <-time.After(15 * time.Second):
-		connection.Close()
-		return "", fmt.Errorf("ICE gathering timed out")
-	}
 	m.mu.Lock()
 	m.peers[sessionID] = connection
+	m.candidates[sessionID] = map[string]struct{}{}
 	m.mu.Unlock()
 	go func() { <-ctx.Done(); m.Close(sessionID) }()
 	return connection.LocalDescription().SDP, nil
+}
+
+// AddICECandidate accepts browser trickle candidates after the offer is relayed.
+func (m *Manager) AddICECandidate(sessionID, encoded string) error {
+	var candidate webrtc.ICECandidateInit
+	if err := json.Unmarshal([]byte(encoded), &candidate); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	peer := m.peers[sessionID]
+	if peer == nil {
+		m.mu.Unlock()
+		return nil
+	}
+	seen := m.candidates[sessionID]
+	if _, exists := seen[encoded]; exists {
+		m.mu.Unlock()
+		return nil
+	}
+	seen[encoded] = struct{}{}
+	m.mu.Unlock()
+	if err := peer.AddICECandidate(candidate); err != nil {
+		m.mu.Lock()
+		delete(m.candidates[sessionID], encoded)
+		m.mu.Unlock()
+		return err
+	}
+	return nil
 }
 func (m *Manager) Close(sessionID string) {
 	m.mu.Lock()
 	peer := m.peers[sessionID]
 	delete(m.peers, sessionID)
+	delete(m.candidates, sessionID)
 	m.mu.Unlock()
 	if peer != nil {
 		_ = peer.Close()
